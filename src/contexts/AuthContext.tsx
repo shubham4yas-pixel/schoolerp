@@ -104,6 +104,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const resolveUserProfile = async (uid: string, email?: string | null): Promise<AppUser | null> => {
+      // 0. Super Admin Bootstrap (Immediate access for your new email)
+      const targetEmail = email?.toLowerCase() || '';
+      if (targetEmail === 'shubham.kt2029i@iimbg.ac.in' || targetEmail === 'shubhamwork@gmail.com') {
+        return {
+          uid,
+          email: targetEmail,
+          role: 'admin',
+          name: 'Shubham (Super Admin)',
+          schoolId: 'school_001',
+          createdAt: new Date().toISOString()
+        } as AppUser;
+      }
+
       // 1. Try Supabase users table
       try {
         const { data: sbUser, error: sbError } = await supabase
@@ -122,7 +135,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
       } catch (err) { }
 
-      // 2. Try Firestore users collection (The original working credentials store)
+      // 2. Try Firestore users collection
       try {
         const globalUserDoc = await getDoc(doc(db, 'users', uid));
         if (globalUserDoc.exists()) {
