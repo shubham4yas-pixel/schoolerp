@@ -84,8 +84,9 @@ const LoginPage = () => {
       }
 
       if (selectedRole !== userData.role) {
+        const roleLabel = roles.find(r => r.role === userData.role)?.label || userData.role;
         setPendingLoginRole(null);
-        setError(`Access denied: This account is registered as ${userData.role}.`);
+        setError(`Access denied: This account is registered as ${roleLabel}.`);
         await signOut();
         return;
       }
@@ -99,9 +100,9 @@ const LoginPage = () => {
 
       navigate(getRoleHomePath(userData.role), { replace: true });
     } catch (error: any) {
-      console.error("LOGIN ERROR:", error.message);
+      console.error("Firebase Login Error:", error.code, error.message);
       
-      // OPTIONAL: Fallback to Supabase if Firebase fails (for newly created users)
+      // OPTIONAL: Fallback to Supabase
       try {
         const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({ email, password });
         if (!sbError && sbData.user) {
@@ -109,12 +110,19 @@ const LoginPage = () => {
             if (userData && selectedRole === userData.role) {
                 navigate(getRoleHomePath(userData.role), { replace: true });
                 return;
+            } else if (userData) {
+                const roleLabel = roles.find(r => r.role === userData.role)?.label || userData.role;
+                setError(`Access denied: This account is registered as ${roleLabel}.`);
+                await signOut();
+                setIsLoading(false);
+                return;
             }
         }
       } catch(e) {}
 
       setPendingLoginRole(null);
-      setError(error.message === 'Firebase: Error (auth/invalid-credential).' ? 'Invalid email or password' : error.message);
+      // Consistent error message for any credential failure
+      setError("Invalid email or password. Please check your credentials.");
     } finally {
       setIsLoading(false);
     }
