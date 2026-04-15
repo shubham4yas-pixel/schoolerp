@@ -61,6 +61,7 @@ interface AppState {
     fetchStudentsByClass: (schoolId: string, classId: string) => () => void;
     listenToClasses: (schoolId: string) => () => void;
     fetchStudents: (schoolId: string) => Promise<void>;
+    syncStudentsToSupabase: (schoolId: string) => Promise<{ success: number; failed: number }>;
     initListeners: (schoolId: string) => () => void;
     setStudents: (students: Student[]) => void;
     setMarks: (marks: Mark[]) => void;
@@ -777,6 +778,55 @@ export const useStore = create<AppState>((set, get) => ({
       }) as any;
 
       set({ students: data, rawStudents: data, loading: { ...get().loading, students: false } });
+    },
+
+    syncStudentsToSupabase: async (schoolId: string) => {
+        if (!db) throw new Error("Firebase not initialized");
+        
+        // 1. Fetch all students from Firestore
+        const snap = await getDocs(collection(db, "schools", schoolId, "students"));
+        const firebaseStudents = snap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        })) as any[];
+
+        let success = 0;
+        let failed = 0;
+
+        // 2. Map and Upsert to Supabase
+        // We'll process them in small batches or individually to be safe
+        for (const s of firebaseStudents) {
+            try {
+                const { error } = await supabase
+                    .from('students')
+                    .upsert({
+                        id: s.id.match(/^[0-9a-fA-F-]{36}$/) ? s.id : undefined, // only use if valid UUID
+                        school_id: schoolId,
+                        roll_number: s.rollNumber || s.id,
+                        name: s.name || "Unknown",
+                        class: s.class || s.className || "",
+                        section: s.section || "",
+                        parent_name: s.parentName || "",
+                        parent_contact: s.parentContact || "",
+                        total_fees: Number(s.totalFees || 0),
+                        paid_amount: Number(s.paidAmount || 0),
+                        is_active: s.isActive !== false,
+                        updated_at: new Date().toISOString()
+                    }, { onConflict: 'roll_number' });
+
+                if (error) {
+                    console.error(`Sync failed for ${s.name}:`, error);
+                    failed++;
+                } else {
+                    success++;
+                }
+            } catch (err) {
+                console.error(`Sync error for ${s.name}:`, err);
+                failed++;
+            }
+        }
+
+        return { success, failed };
     },
 
     initListeners: () => {

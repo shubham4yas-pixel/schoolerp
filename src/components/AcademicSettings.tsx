@@ -9,9 +9,9 @@ import { collection, addDoc, serverTimestamp, query, where, getDocs } from "fire
 
 const AcademicSettings = ({ schoolId }: { schoolId: string }) => {
     const { role } = useAuth();
-    const { exams, subjects, classes, saveExamConfig, saveSubjectConfig, saveClassConfig } = useStore();
+    const { exams, subjects, classes, saveExamConfig, saveSubjectConfig, saveClassConfig, syncStudentsToSupabase } = useStore();
 
-    const [subTab, setSubTab] = useState<'classes' | 'subjects' | 'exams'>('classes');
+    const [subTab, setSubTab] = useState<'classes' | 'subjects' | 'exams' | 'sync'>('classes');
 
     return (
         <div className="space-y-6">
@@ -19,10 +19,74 @@ const AcademicSettings = ({ schoolId }: { schoolId: string }) => {
                 <button onClick={() => setSubTab('classes')} className={`px-4 py-2 text-sm font-medium rounded-lg ${subTab === 'classes' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>Classes</button>
                 <button onClick={() => setSubTab('subjects')} className={`px-4 py-2 text-sm font-medium rounded-lg ${subTab === 'subjects' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>Subjects</button>
                 <button onClick={() => setSubTab('exams')} className={`px-4 py-2 text-sm font-medium rounded-lg ${subTab === 'exams' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>Exams</button>
+                <button onClick={() => setSubTab('sync')} className={`px-4 py-2 text-sm font-medium rounded-lg ${subTab === 'sync' ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>Data Sync</button>
             </div>
             {subTab === 'classes' && <ClassesSettings schoolId={schoolId} classes={classes} saveClassConfig={saveClassConfig} role={role} />}
             {subTab === 'subjects' && <SubjectsSettings schoolId={schoolId} subjects={subjects} classes={classes} saveSubjectConfig={saveSubjectConfig} role={role} />}
             {subTab === 'exams' && <ExamsSettings schoolId={schoolId} exams={exams} saveExamConfig={saveExamConfig} role={role} />}
+            {subTab === 'sync' && <SyncSettings schoolId={schoolId} syncStudentsToSupabase={syncStudentsToSupabase} />}
+        </div>
+    );
+};
+
+const SyncSettings = ({ schoolId, syncStudentsToSupabase }: any) => {
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [stats, setStats] = useState<any>(null);
+
+    const handleSync = async () => {
+        if (!window.confirm("This will upload all 1208 students to Supabase. Continue?")) return;
+        
+        setIsSyncing(true);
+        setStats(null);
+        try {
+            const result = await syncStudentsToSupabase(schoolId);
+            setStats(result);
+            toast.success("Migration completed successfully!");
+        } catch (error) {
+            console.error(error);
+            toast.error("Migration failed. Please check logs.");
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    return (
+        <div className="space-y-4 p-6 bg-card border rounded-xl shadow-sm">
+            <div className="flex items-center gap-4">
+                <div className="p-3 bg-primary/10 rounded-xl">
+                    <Layers className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                    <h3 className="text-lg font-bold">Migration Tool</h3>
+                    <p className="text-sm text-muted-foreground">Sync your students from Firestore to Supabase</p>
+                </div>
+            </div>
+
+            <div className="text-sm text-muted-foreground bg-muted/30 p-4 rounded-lg border border-border">
+                <p>This tool will fetch all student records currently in Firebase and upsert them into your Supabase Postgres database. This ensures both dashboards are perfectly in sync.</p>
+            </div>
+
+            <button 
+                onClick={handleSync} 
+                disabled={isSyncing}
+                className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all ${isSyncing ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground hover:opacity-90 shadow-lg shadow-primary/20'}`}
+            >
+                {isSyncing ? <Layers className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {isSyncing ? "Syncing 1208 Students..." : "Migrate All Students to Supabase"}
+            </button>
+
+            {stats && (
+                <div className="mt-4 p-4 bg-muted/50 rounded-lg border border-border grid grid-cols-2 gap-4">
+                    <div className="text-center">
+                        <div className="text-2xl font-bold text-success">{stats.success}</div>
+                        <div className="text-xs text-muted-foreground">Successfully Synced</div>
+                    </div>
+                    <div className="text-center">
+                        <div className="text-2xl font-bold text-destructive">{stats.failed}</div>
+                        <div className="text-xs text-muted-foreground">Errors / Retries</div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
