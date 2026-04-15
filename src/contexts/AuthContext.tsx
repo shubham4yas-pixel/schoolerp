@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { auth, db } from '@/lib/firebase';
-import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
+import { doc, getDoc, getFirestore } from 'firebase/firestore';
 import { UserRole, AppUser } from '@/lib/types';
 import { useStore } from '@/store/useStore';
 
@@ -50,6 +50,7 @@ interface AuthContextType {
   authError: string | null;
   clearAuthError: () => void;
   setPendingLoginRole: (role: UserRole | null) => void;
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -68,13 +69,14 @@ const AuthContext = createContext<AuthContextType>({
   authError: null,
   clearAuthError: () => { },
   setPendingLoginRole: () => { },
+  signOut: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [role, setRole] = useState<UserRole | null>(null);
-  const [schoolId, setSchoolId] = useState('school_001'); // Force school_001
+  const [schoolId, setSchoolId] = useState('school_001'); 
   const [parentStudentId, setParentStudentId] = useState('S001');
   const [studentId, setStudentId] = useState('S001');
   const [classId, setClassId] = useState<string | null>(null);
@@ -83,62 +85,98 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [authError, setAuthError] = useState<string | null>(null);
   const setCurrentUser = useStore(state => state.setCurrentUser);
 
-  useEffect(() => {
-    const resetAuthState = () => {
-      setUser(null);
-      setRole(null);
-      setSchoolId('school_001');
-      setParentStudentId('S001');
-      setStudentId('S001');
-      setClassId(null);
-      setCurrentUser(null);
-    };
+  const resetAuthState = () => {
+    setUser(null);
+    setRole(null);
+    setSchoolId('school_001');
+    setParentStudentId('S001');
+    setStudentId('S001');
+    setClassId(null);
+    setCurrentUser(null);
+  };
 
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    resetAuthState();
+  };
+
+  useEffect(() => {
     const resolveUserProfile = async (uid: string, email?: string | null): Promise<AppUser | null> => {
-      const globalUserDoc = await getDoc(doc(db, 'users', uid));
-      if (!globalUserDoc.exists()) {
-        return null;
+      // First try Supabase users table (preferred)
+      const { data: sbUser, error: sbError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('uid', uid)
+        .maybeSingle();
+
+      if (!sbError && sbUser) {
+        return {
+          ...sbUser,
+          uid: sbUser.uid || uid,
+          email: sbUser.email || email || '',
+          schoolId: sbUser.schoolId || 'school_001',
+        } as AppUser;
       }
 
-      const globalUserData = globalUserDoc.data() as AppUser;
-      return {
-        ...globalUserData,
-        uid: globalUserData.uid || uid,
-        email: globalUserData.email || email || '',
-        schoolId: globalUserData.schoolId || 'school_001',
-      };
+      // Fallback to Firestore for legacy profiles
+      try {
+        const docRef = doc(db, 'users', uid);
+        const globalUserDoc = await getDoc(docRef);
+        if (globalUserDoc.exists()) {
+          const globalUserData = globalUserDoc.data() as AppUser;
+          return {
+            ...globalUserData,
+            uid: globalUserData.uid || uid,
+            email: globalUserData.email || email || '',
+            schoolId: globalUserData.schoolId || 'school_001',
+          };
+        }
+      } catch (err) {
+        console.error("Firestore resolution error:", err);
+      }
+      
+      return null;
     };
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await handleAuthStateChange(session.user);
+      } else {
+        setAuthLoading(false);
+      }
+    };
+
+    const handleAuthStateChange = async (sbUser: any) => {
       setAuthLoading(true);
       try {
-        if (firebaseUser) {
-          const userData = await resolveUserProfile(firebaseUser.uid, firebaseUser.email);
+        if (sbUser) {
+          const userData = await resolveUserProfile(sbUser.id, sbUser.email);
           const pendingLoginRole = readPendingLoginRole();
 
           if (!userData) {
-            setAuthError("User not registered");
+            setAuthError("User not registered in profile database");
             writePendingLoginRole(null);
             resetAuthState();
-            await firebaseSignOut(auth);
+            await supabase.auth.signOut();
             return;
           }
 
           if (pendingLoginRole && userData.role !== pendingLoginRole) {
-            setAuthError("Access denied for selected role");
+            setAuthError(`Access denied: User is registered as ${userData.role}, not ${pendingLoginRole}`);
             writePendingLoginRole(null);
             resetAuthState();
-            await firebaseSignOut(auth);
+            await supabase.auth.signOut();
             return;
           }
 
           const linkedStudentId = getLinkedStudentId(userData);
 
           if (userData.role === 'student' && !linkedStudentId) {
-            setAuthError("No student linked");
+            setAuthError("No student linked to this account");
             writePendingLoginRole(null);
             resetAuthState();
-            await firebaseSignOut(auth);
+            await supabase.auth.signOut();
             return;
           }
 
@@ -161,9 +199,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } finally {
         setAuthLoading(false);
       }
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (session?.user) handleAuthStateChange(session.user);
+      } else if (event === 'SIGNED_OUT') {
+        handleAuthStateChange(null);
+      }
     });
 
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, [setCurrentUser]);
 
   const clearAuthError = () => setAuthError(null);

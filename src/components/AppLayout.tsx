@@ -4,7 +4,7 @@ import { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 
 const AppLayout = ({ children, title }: { children: ReactNode; title: string }) => {
-  const { role, setRole } = useAuth();
+  const { role, signOut } = useAuth();
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -21,7 +21,7 @@ const AppLayout = ({ children, title }: { children: ReactNode; title: string }) 
           </div>
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setRole(null)}
+              onClick={() => signOut()}
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted rounded-xl transition-colors"
             >
               <LogOut className="w-4 h-4" />

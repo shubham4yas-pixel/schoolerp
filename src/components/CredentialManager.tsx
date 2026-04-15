@@ -382,7 +382,10 @@ const CredentialManager = () => {
 
   const handleSendResetEmail = async (user: AppUser) => {
     try {
-      await sendPasswordResetEmail(auth, user.email);
+      const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
       await markEmailSent(user.uid);
       toast.success(`Reset link sent to ${user.email}`);
     } catch (err: any) {
@@ -403,7 +406,10 @@ const CredentialManager = () => {
 
     for (const user of pendingEmailUsers) {
       try {
-        await sendPasswordResetEmail(auth, user.email);
+        const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+        if (error) throw error;
         await markEmailSent(user.uid);
         successCount += 1;
       } catch (error) {

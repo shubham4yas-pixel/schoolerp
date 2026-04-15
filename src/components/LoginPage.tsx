@@ -2,15 +2,15 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppUser, UserRole } from '@/lib/types';
-import { auth, db } from '@/lib/firebase';
-import { signInWithEmailAndPassword, sendPasswordResetEmail, signOut as firebaseSignOut } from 'firebase/auth';
+import { db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 import { doc, getDoc } from 'firebase/firestore';
 import { Shield, BookOpen, Users, GraduationCap, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getRoleHomePath } from '@/components/ProtectedRoute';
 
 const LoginPage = () => {
-  const { authError, clearAuthError, setPendingLoginRole, authLoading } = useAuth();
+  const { authError, clearAuthError, setPendingLoginRole, authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [email, setEmail] = useState('');
@@ -19,20 +19,39 @@ const LoginPage = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const resolveUserProfile = async (uid: string): Promise<AppUser | null> => {
-    const userRef = doc(db, 'users', uid);
-    const userSnap = await getDoc(userRef);
+    // Check Supabase first
+    const { data: sbUser, error: sbError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('uid', uid)
+      .maybeSingle();
 
-    if (!userSnap.exists()) {
-      console.error("User not found");
-      return null;
+    if (!sbError && sbUser) {
+      return {
+        ...sbUser,
+        uid: sbUser.uid || uid,
+        schoolId: sbUser.schoolId || 'school_001',
+      } as AppUser;
     }
 
-    const userData = userSnap.data() as AppUser;
-    return {
-      ...userData,
-      uid: userData.uid || uid,
-      schoolId: userData.schoolId || 'school_001',
-    };
+    // Fallback to Firestore
+    try {
+      const userRef = doc(db, 'users', uid);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists()) {
+        const userData = userSnap.data() as AppUser;
+        return {
+          ...userData,
+          uid: userData.uid || uid,
+          schoolId: userData.schoolId || 'school_001',
+        };
+      }
+    } catch (err) {
+      console.error("Firestore lookup error:", err);
+    }
+
+    return null;
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -54,27 +73,33 @@ const LoginPage = () => {
     setPendingLoginRole(selectedRole);
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const userData = await resolveUserProfile(userCredential.user.uid);
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) throw signInError;
+
+      const userData = await resolveUserProfile(data.user.id);
 
       if (!userData) {
         setPendingLoginRole(null);
-        setError("User not registered");
-        await firebaseSignOut(auth);
+        setError("User not registered in profile database");
+        await signOut();
         return;
       }
 
       if (selectedRole !== userData.role) {
         setPendingLoginRole(null);
-        setError("Access denied for selected role");
-        await firebaseSignOut(auth);
+        setError(`Access denied: User is registered as ${userData.role}`);
+        await signOut();
         return;
       }
 
       if (userData.role === 'student' && !userData.linkedStudentId && !(userData.linkedChildrenIds || []).length) {
         setPendingLoginRole(null);
-        setError("No student linked");
-        await firebaseSignOut(auth);
+        setError("No student linked to this account");
+        await signOut();
         return;
       }
 
@@ -99,12 +124,14 @@ const LoginPage = () => {
     }
 
     try {
-      await sendPasswordResetEmail(auth, email);
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
       toast.success("Password reset email sent. Check your inbox.");
     } catch (err: any) {
       console.error(err);
-      if (err.code === 'auth/user-not-found') toast.error("No account found with this email");
-      else toast.error(err.message || "Failed to send reset email");
+      toast.error(err.message || "Failed to send reset email");
     }
   };
 
