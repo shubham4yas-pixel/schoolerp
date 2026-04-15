@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppUser, UserRole } from '@/lib/types';
-import { db } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
 import { supabase } from '@/lib/supabase';
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { Shield, BookOpen, Users, GraduationCap, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -19,7 +20,7 @@ const LoginPage = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const resolveUserProfile = async (uid: string): Promise<AppUser | null> => {
-    // Check Supabase first
+    // 1. Try Supabase first
     const { data: sbUser, error: sbError } = await supabase
       .from('users')
       .select('*')
@@ -34,7 +35,7 @@ const LoginPage = () => {
       } as AppUser;
     }
 
-    // Fallback to Firestore
+    // 2. Fallback to Firestore (original store)
     try {
       const userRef = doc(db, 'users', uid);
       const userSnap = await getDoc(userRef);
@@ -47,9 +48,7 @@ const LoginPage = () => {
           schoolId: userData.schoolId || 'school_001',
         };
       }
-    } catch (err) {
-      console.error("Firestore lookup error:", err);
-    }
+    } catch (err) { }
 
     return null;
   };
@@ -73,32 +72,27 @@ const LoginPage = () => {
     setPendingLoginRole(selectedRole);
 
     try {
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (signInError) throw signInError;
-
-      const userData = await resolveUserProfile(data.user.id);
+      // PRIMARY: Login via Firebase so existing credentials work
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const userData = await resolveUserProfile(userCredential.user.uid);
 
       if (!userData) {
         setPendingLoginRole(null);
-        setError("User not registered in profile database");
+        setError("Account verified, but profile not found. Please contact admin.");
         await signOut();
         return;
       }
 
       if (selectedRole !== userData.role) {
         setPendingLoginRole(null);
-        setError(`Access denied: User is registered as ${userData.role}`);
+        setError(`Access denied: This account is registered as ${userData.role}.`);
         await signOut();
         return;
       }
 
       if (userData.role === 'student' && !userData.linkedStudentId && !(userData.linkedChildrenIds || []).length) {
         setPendingLoginRole(null);
-        setError("No student linked to this account");
+        setError("No student record linked to this account.");
         await signOut();
         return;
       }
@@ -106,8 +100,21 @@ const LoginPage = () => {
       navigate(getRoleHomePath(userData.role), { replace: true });
     } catch (error: any) {
       console.error("LOGIN ERROR:", error.message);
+      
+      // OPTIONAL: Fallback to Supabase if Firebase fails (for newly created users)
+      try {
+        const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({ email, password });
+        if (!sbError && sbData.user) {
+            const userData = await resolveUserProfile(sbData.user.id);
+            if (userData && selectedRole === userData.role) {
+                navigate(getRoleHomePath(userData.role), { replace: true });
+                return;
+            }
+        }
+      } catch(e) {}
+
       setPendingLoginRole(null);
-      setError(error.message);
+      setError(error.message === 'Firebase: Error (auth/invalid-credential).' ? 'Invalid email or password' : error.message);
     } finally {
       setIsLoading(false);
     }
@@ -124,10 +131,7 @@ const LoginPage = () => {
     }
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      if (error) throw error;
+      await sendPasswordResetEmail(auth, email);
       toast.success("Password reset email sent. Check your inbox.");
     } catch (err: any) {
       console.error(err);

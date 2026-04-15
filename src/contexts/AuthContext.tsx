@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { db } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
+import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { supabase } from '@/lib/supabase';
-import { doc, getDoc, getFirestore } from 'firebase/firestore';
 import { UserRole, AppUser } from '@/lib/types';
 import { useStore } from '@/store/useStore';
 
@@ -96,32 +97,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
+    await firebaseSignOut(auth);
     await supabase.auth.signOut();
     resetAuthState();
   };
 
   useEffect(() => {
     const resolveUserProfile = async (uid: string, email?: string | null): Promise<AppUser | null> => {
-      // First try Supabase users table (preferred)
-      const { data: sbUser, error: sbError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('uid', uid)
-        .maybeSingle();
-
-      if (!sbError && sbUser) {
-        return {
-          ...sbUser,
-          uid: sbUser.uid || uid,
-          email: sbUser.email || email || '',
-          schoolId: sbUser.schoolId || 'school_001',
-        } as AppUser;
-      }
-
-      // Fallback to Firestore for legacy profiles
+      // 1. Try Supabase users table
       try {
-        const docRef = doc(db, 'users', uid);
-        const globalUserDoc = await getDoc(docRef);
+        const { data: sbUser, error: sbError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('uid', uid)
+          .maybeSingle();
+
+        if (!sbError && sbUser) {
+          return {
+             ...sbUser,
+             uid: sbUser.uid || uid,
+             email: sbUser.email || email || '',
+             schoolId: sbUser.schoolId || 'school_001',
+          } as AppUser;
+        }
+      } catch (err) { }
+
+      // 2. Try Firestore users collection (The original working credentials store)
+      try {
+        const globalUserDoc = await getDoc(doc(db, 'users', uid));
         if (globalUserDoc.exists()) {
           const globalUserData = globalUserDoc.data() as AppUser;
           return {
@@ -131,52 +134,41 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             schoolId: globalUserData.schoolId || 'school_001',
           };
         }
-      } catch (err) {
-        console.error("Firestore resolution error:", err);
-      }
+      } catch (err) { }
       
       return null;
     };
 
-    const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        await handleAuthStateChange(session.user);
-      } else {
-        setAuthLoading(false);
-      }
-    };
-
-    const handleAuthStateChange = async (sbUser: any) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setAuthLoading(true);
       try {
-        if (sbUser) {
-          const userData = await resolveUserProfile(sbUser.id, sbUser.email);
+        if (firebaseUser) {
+          const userData = await resolveUserProfile(firebaseUser.uid, firebaseUser.email);
           const pendingLoginRole = readPendingLoginRole();
 
           if (!userData) {
-            setAuthError("User not registered in profile database");
+            setAuthError("User profile not found. Please contact admin.");
             writePendingLoginRole(null);
             resetAuthState();
-            await supabase.auth.signOut();
+            await firebaseSignOut(auth);
             return;
           }
 
           if (pendingLoginRole && userData.role !== pendingLoginRole) {
-            setAuthError(`Access denied: User is registered as ${userData.role}, not ${pendingLoginRole}`);
+            setAuthError(`Entry denied: User is registered as ${userData.role}, not ${pendingLoginRole}.`);
             writePendingLoginRole(null);
             resetAuthState();
-            await supabase.auth.signOut();
+            await firebaseSignOut(auth);
             return;
           }
 
           const linkedStudentId = getLinkedStudentId(userData);
 
           if (userData.role === 'student' && !linkedStudentId) {
-            setAuthError("No student linked to this account");
+            setAuthError("No student record linked to this account.");
             writePendingLoginRole(null);
             resetAuthState();
-            await supabase.auth.signOut();
+            await firebaseSignOut(auth);
             return;
           }
 
@@ -194,24 +186,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           resetAuthState();
         }
       } catch (error) {
-        console.error("Error synchronizing auth state:", error);
+        console.error("Auth sync error:", error);
         resetAuthState();
       } finally {
         setAuthLoading(false);
       }
-    };
-
-    initAuth();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        if (session?.user) handleAuthStateChange(session.user);
-      } else if (event === 'SIGNED_OUT') {
-        handleAuthStateChange(null);
-      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => unsubscribe();
   }, [setCurrentUser]);
 
   const clearAuthError = () => setAuthError(null);
@@ -221,8 +203,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ role, setRole, schoolId, setSchoolId, parentStudentId, setParentStudentId, studentId, setStudentId, classId, setClassId, user, authLoading, authError, clearAuthError, setPendingLoginRole }}>
+    <AuthContext.Provider value={{ role, setRole, schoolId, setSchoolId, parentStudentId, setParentStudentId, studentId, setStudentId, classId, setClassId, user, authLoading, authError, clearAuthError, setPendingLoginRole, signOut }}>
       {children}
     </AuthContext.Provider>
-  );
 };
