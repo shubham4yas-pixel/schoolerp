@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppUser, UserRole } from '@/lib/types';
-import { auth, db } from '@/lib/firebase';
+import { auth, db } from '@/firebase';
 import { supabase } from '@/lib/supabase';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';

@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx';
 import { AlertCircle, Check, Key, Loader2, Plus, Save, Search, Send, Shield, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { auth, db, firebaseConfig } from '@/lib/firebase';
+import { auth, db, firebaseConfig } from '@/firebase';
 import { supabase } from '@/lib/supabase';
 import { sanitize } from '@/lib/data-utils';
 import { AppUser, LoginCredential, Student, UserRole, ClassConfig } from '@/lib/types';

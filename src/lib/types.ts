@@ -91,6 +91,7 @@ export interface Student {
   dateOfBirth?: string;
   bloodGroup?: string;
   isActive?: boolean;
+  transport_enabled?: boolean;
   fees?: StudentFees;   // Temporary compatibility
   bus?: {
     opted: boolean;
@@ -138,6 +139,9 @@ export interface Mark {
   marksObtained: number;
   totalMarks: number;
   date: string;
+  isPublished?: boolean;
+  subjectId?: string;
+  examId?: string;
 }
 
 export interface AttendanceRecord {

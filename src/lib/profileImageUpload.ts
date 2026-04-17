@@ -1,6 +1,6 @@
 import { doc, setDoc } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
-import { db, storage } from "@/lib/firebase";
+import { db, storage } from "@/firebase";
 import { sanitize } from "@/lib/data-utils";
 
 const mapUploadError = (error: unknown) => {

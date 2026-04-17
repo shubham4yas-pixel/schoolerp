@@ -9,8 +9,8 @@ import AttendanceEntryPanel from '@/components/AttendanceEntryPanel';
 import { UserPlus, ClipboardList, Calendar, MessageSquare, IndianRupee, Check, ChevronRight, ChevronLeft, Loader2, Users, CheckSquare, Bus, RotateCcw, Send, Upload, Save } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
-
 import { hasSubAccess } from '@/lib/rbac-utils';
+import BatchMarksEntry from '@/components/BatchMarksEntry';
 
 const colors = ['#1e3a5f', '#d4950a', '#2e8b6e', '#000085e9', '#dc4545', '#0891b2', '#9333ea'];
 
@@ -165,7 +165,15 @@ const StudentRegistrationForm = ({ schoolId, addStudent, students, role }: { sch
       address: form.address, 
       dateOfBirth: form.dateOfBirth, 
       bloodGroup: form.bloodGroup,
-      ...(busOpted && { bus: { opted: true, pickup: bus.pickup, drop: bus.drop, route: bus.route, fee: parseFloat(bus.fee) || 0 } }),
+      transport_enabled: busOpted,
+      bus: { 
+        opted: busOpted, 
+        enabled: busOpted,
+        pickup: bus.pickup, 
+        drop: bus.drop, 
+        route: bus.route, 
+        fee: parseFloat(bus.fee) || 0 
+      },
     };
 
     // Supabase insert logic
@@ -183,6 +191,7 @@ const StudentRegistrationForm = ({ schoolId, addStudent, students, role }: { sch
           roll_number: newStudent.rollNumber,
           total_fees: newStudent.totalFees,
           paid_amount: newStudent.paidAmount,
+          transport_enabled: busOpted,
           created_at: new Date().toISOString(),
         }
       ]);
@@ -321,449 +330,7 @@ const StudentRegistrationForm = ({ schoolId, addStudent, students, role }: { sch
 
 // ─── Marks Entry ─────────────────────────────────────────────────────────────
 const MarksEntryForm = ({ schoolId, addMark, students, role }: { schoolId: string; addMark: any; students: Student[]; role: string | null }) => {
-  const { globalFilterClass: filterClass, globalFilterSection: filterSection, setGlobalFilterClass, setGlobalFilterSection, exams, subjects: allSubjects, updateStudentResult, updateExamPublishStatus, saveExamConfig, classes } = useStore();
-
-  const PERSIST_KEY = 'marks_entry_context';
-  const getSafeContext = () => {
-    try {
-      const saved = localStorage.getItem(PERSIST_KEY);
-      return saved ? JSON.parse(saved) : null;
-    } catch { return null; }
-  };
-
-  const [context, setContext] = useState(getSafeContext() || {
-    subjectId: '',
-    examId: exams?.[0]?.id || '',
-    date: new Date().toISOString().split('T')[0],
-    totalMarks: '100'
-  });
-
-  const [publishing, setPublishing] = useState(false);
-  const sortedExams = useMemo(() => [...exams].sort((a, b) => a.order - b.order), [exams]);
-  const examValues = sortedExams.map(e => e.id);
-  const examLabels = sortedExams.map(e => e.name);
-
-  const [localMarks, setLocalMarks] = useState<Record<string, string>>({}); // Key: studentId-subjectId
-  const [savingStatus, setSavingStatus] = useState<Record<string, 'idle' | 'saving' | 'saved' | 'error'>>({}); // Key: studentId-subjectId
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  const filteredStudents = useMemo(
-    () => filterClass ? getStudentsByClassSection(students, filterClass, filterSection || undefined) : [],
-    [students, filterClass, filterSection]
-  );
-
-  const toggleStudent = (id: string) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
-    if (selectedIds.size === filteredStudents.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(filteredStudents.map(s => s.id)));
-  };
-
-  useEffect(() => {
-    localStorage.setItem(PERSIST_KEY, JSON.stringify(context));
-  }, [context]);
-
-  const [saving, setSaving] = useState(false);
-
-  const handleDownloadTemplate = () => {
-    if (!filterClass || !context.subjectId || !context.examId) {
-      toast.error("Please select a class, subject and exam first.");
-      return;
-    }
-
-    const subName = allSubjects.find(s => s.id === context.subjectId)?.name || context.subjectId;
-    const headers = ["Roll No", "Student ID", "Name", "Marks", "Out Of"];
-    const data = filteredStudents.map(s => ({
-      "Roll No": s.rollNumber || s.id,
-      "Student ID": s.id,
-      "Name": s.name,
-      "Marks": "",
-      "Out Of": context.totalMarks
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(data, { header: headers });
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Marks Template");
-    XLSX.writeFile(wb, `${getClassName(filterClass, classes)}_${subName}_${context.examId}_Template.xlsx`);
-    toast.success("Template downloaded!");
-  };
-
-  const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const bstr = evt.target?.result as string;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const data: any[] = XLSX.utils.sheet_to_json(ws);
-
-        if (!data.length) {
-          toast.error("File is empty or invalid format");
-          return;
-        }
-
-        setSaving(true);
-        let processedCount = 0;
-        for (const row of data) {
-          const sId = row["Student ID"];
-          const rNo = row["Roll No"];
-          const marks = row["Marks"];
-
-          const student = students.find(s => s.id === sId) || (rNo ? students.find(s => (s.rollNumber || (s as any).rollNo) === rNo) : null);
-
-          if (student && marks !== undefined && marks !== "" && context.subjectId && context.examId) {
-            const val = parseFloat(marks);
-            if (!isNaN(val)) {
-              await updateStudentResult(schoolId, student.id, context.examId, context.subjectId, val, 'bulk_entry');
-              processedCount++;
-            }
-          }
-        }
-        toast.success(`Imported marks for ${processedCount} students`);
-      } catch (err) {
-        toast.error("Import failed. Check file format.");
-      } finally {
-        setSaving(false);
-      }
-    };
-    reader.readAsBinaryString(file);
-  };
-
-  const reset = () => {
-    setLocalMarks({});
-    setSavingStatus({});
-  };
-
-  const handleSave = async () => {
-    // Already handled by auto-save in this component, but keeping for visual consistency
-    toast.success("All marks saved successfully");
-  };
-
-  const handleMassPublish = async (ids: string[], isPublished: boolean) => {
-    if (!ids.length || !context.examId) return;
-    setPublishing(true);
-    try {
-      await updateExamPublishStatus(schoolId, ids, context.examId, isPublished);
-      toast.success(`Marks ${isPublished ? 'published' : 'unpublished'} for ${ids.length} students`);
-      if (ids.length === selectedIds.size) setSelectedIds(new Set());
-    } catch (err) {
-      toast.error("Status update failed");
-    } finally {
-      setPublishing(false);
-    }
-  };
-
-  const applicableSubjects = useMemo(() => {
-    if (!filterClass || allSubjects.length === 0) return { values: [], labels: [] };
-    const filtered = allSubjects.filter(sub => !sub.classIds || sub.classIds.length === 0 || sub.classIds.includes(filterClass));
-    return { values: filtered.map(s => s.id), labels: filtered.map(s => s.name) };
-  }, [filterClass, allSubjects]);
-
-  const handleMarkChange = (studentId: string, val: string) => {
-    const key = `${studentId}-${context.subjectId}`;
-    setLocalMarks(prev => ({ ...prev, [key]: val }));
-    const marksNum = parseFloat(val);
-    const totalNum = parseFloat(context.totalMarks);
-
-    if (val === '') {
-      setSavingStatus(prev => ({ ...prev, [key]: 'idle' }));
-    } else if (!isNaN(marksNum) && marksNum >= 0 && marksNum <= totalNum) {
-      triggerAutoSave(studentId, marksNum);
-    } else {
-      setSavingStatus(prev => ({ ...prev, [key]: 'error' }));
-    }
-  };
-
-  const autoSaveTimers = useRef<Record<string, NodeJS.Timeout>>({});
-  const triggerAutoSave = (studentId: string, marks: number) => {
-    const key = `${studentId}-${context.subjectId}`;
-    if (autoSaveTimers.current[key]) clearTimeout(autoSaveTimers.current[key]);
-    setSavingStatus(prev => ({ ...prev, [key]: 'saving' }));
-
-    autoSaveTimers.current[key] = setTimeout(async () => {
-      try {
-        await updateStudentResult(schoolId, studentId, context.examId, context.subjectId, marks, 'bulk_entry');
-        setSavingStatus(prev => ({ ...prev, [key]: 'saved' }));
-        setTimeout(() => setSavingStatus(prev => ({ ...prev, [key]: 'idle' })), 2000);
-      } catch (err) {
-        setSavingStatus(prev => ({ ...prev, [key]: 'error' }));
-      }
-    }, 300);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
-    const inputs = document.querySelectorAll('.mark-input');
-    if (e.key === 'ArrowDown' || e.key === 'Enter') {
-      (inputs[index + 1] as HTMLElement)?.focus();
-    } else if (e.key === 'ArrowUp') {
-      (inputs[index - 1] as HTMLElement)?.focus();
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap gap-4 items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h3 className="font-display font-semibold text-foreground text-lg">Batch Marks Entry</h3>
-          {selectedIds.size > 0 && (
-            <span className="px-2.5 py-0.5 bg-primary/10 text-primary text-[10px] font-black uppercase rounded-full border border-primary/20">
-              {selectedIds.size} Selected
-            </span>
-          )}
-        </div>
-
-        <div className="flex flex-wrap gap-2 items-center">
-          {context.examId && filteredStudents.length > 0 && (
-            <>
-              {/* Publication Group */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleMassPublish(filteredStudents.map(s => s.id), true)}
-                  disabled={publishing}
-                  className="h-8 px-3 text-[11px] font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-                >
-                  <Send className="w-3 h-3" />
-                  Publish All
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleMassPublish(Array.from(selectedIds), true)}
-                  disabled={publishing || selectedIds.size === 0}
-                  className="h-8 px-3 text-[11px] font-bold rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-                >
-                  <Send className="w-3 h-3" />
-                  Publish Selected
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleMassPublish(filteredStudents.map(s => s.id), false)}
-                  disabled={publishing}
-                  className="h-8 px-3 text-[11px] font-bold rounded-lg bg-orange-600 text-white hover:bg-orange-700 transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  Unpublish All
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleMassPublish(Array.from(selectedIds), false)}
-                  disabled={publishing || selectedIds.size === 0}
-                  className="h-8 px-3 text-[11px] font-bold rounded-lg bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 transition-all flex items-center gap-1.5 disabled:opacity-40"
-                >
-                  <RotateCcw className="w-3 h-3 opacity-60" />
-                  Unpublish Selected
-                </button>
-              </div>
-
-              {/* Utility Group */}
-              <div className="flex items-center gap-2 border-l border-border pl-2">
-                <button
-                  type="button"
-                  onClick={handleDownloadTemplate}
-                  className="h-8 px-3 text-[11px] font-bold bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-all flex items-center gap-1.5"
-                >
-                  <Upload className="w-3 h-3 rotate-180" />
-                  Template
-                </button>
-                <label className="h-8 px-3 text-[11px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-all flex items-center gap-1.5 cursor-pointer">
-                  <Upload className="w-3 h-3" />
-                  Upload Excel
-                  <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
-                </label>
-              </div>
-
-              <button
-                type="button"
-                onClick={reset}
-                className="h-8 px-3 text-[11px] font-bold bg-muted text-muted-foreground rounded-lg hover:bg-muted/80 transition-all flex items-center gap-1.5"
-              >
-                <RotateCcw className="w-3 h-3" />
-                Reset
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="h-8 px-4 text-[11px] font-bold bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-              >
-                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                {saving ? 'Saving...' : `Save All (${filteredStudents.length})`}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-3 bg-muted/20 p-4 rounded-2xl border border-border items-end">
-        {/* 1. Class filter */}
-        <div className="min-w-[140px]">
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Class</label>
-          <select
-            value={filterClass}
-            onChange={e => {
-              setGlobalFilterClass(e.target.value);
-              setGlobalFilterSection('');
-            }}
-            className="w-full pl-3 pr-4 py-2 text-sm bg-muted/50 border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring font-medium"
-          >
-            <option value="">Select Class...</option>
-            {classes.sort((a, b) => a.order - b.order).map(c => (
-              <option key={c.classId} value={c.classId}>{getClassName(c.classId, classes)}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* 2. Section selector */}
-        {filterClass && (
-          <div className="min-w-[100px]">
-            <label className="block text-xs font-medium text-muted-foreground mb-1">Section</label>
-            <select
-              value={filterSection}
-              onChange={e => setGlobalFilterSection(e.target.value)}
-              className="w-full pl-3 pr-4 py-2 text-sm bg-muted/50 border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring font-medium"
-            >
-              <option value="">All Sec</option>
-              {getUniqueSections(students, filterClass).map(s => (
-                <option key={s} value={s}>Sec {s}</option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {/* 3. Exam selector */}
-        <div className="min-w-[140px]">
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Exam</label>
-          <select
-            value={context.examId}
-            onChange={v => setContext({ ...context, examId: v.target.value })}
-            className="w-full pl-3 pr-4 py-2 text-sm bg-muted/50 border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring font-medium"
-          >
-            <option value="">Select Exam...</option>
-            {examValues.map((v, i) => (
-              <option key={v} value={v}>{examLabels[i]}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* 4. Subject selector */}
-        <div className="min-w-[140px]">
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Subject</label>
-          <select
-            value={context.subjectId}
-            onChange={v => setContext({ ...context, subjectId: v.target.value })}
-            className="w-full pl-3 pr-4 py-2 text-sm bg-muted/50 border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring font-medium"
-          >
-            <option value="">Select Subject...</option>
-            {applicableSubjects.values.map((v, i) => (
-              <option key={v} value={v}>{applicableSubjects.labels[i]}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* 5. Total Marks */}
-        <div className="min-w-[90px]">
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Total Marks</label>
-          <input
-            type="number"
-            value={context.totalMarks}
-            onChange={e => setContext({ ...context, totalMarks: e.target.value })}
-            placeholder="100"
-            className="w-full px-3 py-2 text-sm bg-muted/50 border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring font-medium text-center"
-          />
-        </div>
-
-        {/* 6. Date filter */}
-        <div className="min-w-[120px]">
-          <label className="block text-xs font-medium text-muted-foreground mb-1">Exam Date</label>
-          <input
-            type="date"
-            value={context.date}
-            onChange={e => setContext({ ...context, date: e.target.value })}
-            className="w-full px-3 py-2 text-sm bg-muted/50 border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring font-medium"
-          />
-        </div>
-      </div>
-
-      {!filterClass ? (
-        <EmptySection message="Select a class and section to load students." />
-      ) : filteredStudents.length === 0 ? (
-        <EmptySection message="No students found." />
-      ) : (
-        <div className="border border-border rounded-2xl overflow-hidden shadow-sm bg-card">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/50 border-b border-border">
-                <th className="px-5 py-3 text-left w-10">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.size === filteredStudents.length && filteredStudents.length > 0}
-                    onChange={toggleAll}
-                    className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 accent-primary"
-                  />
-                </th>
-                <th className="px-5 py-3 text-left font-bold text-muted-foreground uppercase tracking-widest text-[10px]">Roll No</th>
-                <th className="px-5 py-3 text-left font-bold text-muted-foreground uppercase tracking-widest text-[10px]">Student Name</th>
-                <th className="px-5 py-3 text-right font-bold text-muted-foreground uppercase tracking-widest text-[10px] w-48">Marks</th>
-                <th className="px-5 py-3 text-center font-bold text-muted-foreground uppercase tracking-widest text-[10px] w-24">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/50">
-              {filteredStudents.map((student, idx) => {
-                const key = `${student.id}-${context.subjectId}`;
-                const status = savingStatus[key] || 'idle';
-                const currentVal = localMarks[key] ?? (student.results?.[context.examId]?.subjects?.[context.subjectId]?.marks?.toString() || '');
-                return (
-                  <tr key={student.id} className={`hover:bg-muted/20 transition-colors ${selectedIds.has(student.id) ? 'bg-primary/5' : ''}`}>
-                    <td className="px-5 py-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(student.id)}
-                        onChange={() => toggleStudent(student.id)}
-                        className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 accent-primary"
-                      />
-                    </td>
-                    <td className="px-5 py-4 font-bold text-xs text-primary/60">[{student.rollNumber || student.id}]</td>
-                    <td className="px-5 py-4 font-bold text-foreground">{student.name}</td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center justify-end gap-2 text-muted-foreground font-semibold">
-                        <input
-                          type="number"
-                          className="mark-input w-20 bg-background border border-border rounded-lg px-3 py-1.5 font-black text-primary text-right outline-none focus:ring-2 focus:ring-primary/20 transition-all font-sans"
-                          value={currentVal}
-                          onChange={(e) => handleMarkChange(student.id, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, idx)}
-                          placeholder="-"
-                        />
-                        <span className="opacity-40">/ {context.totalMarks}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex justify-center">
-                        {status === 'saving' && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
-                        {status === 'saved' && <div className="px-2 py-0.5 bg-success/10 text-success rounded text-[9px] font-black uppercase tracking-widest flex items-center gap-1"><Check className="w-3 h-3" /> Saved</div>}
-                        {status === 'error' && <div className="px-2 py-0.5 bg-destructive/10 text-destructive rounded text-[9px] font-black uppercase tracking-widest">Invalid</div>}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
+  return <BatchMarksEntry />;
 };
 
 // ─── Attendance ───────────────────────────────────────────────────────────────
@@ -1276,7 +843,7 @@ const FeeUpdateForm = ({ schoolId, students, role }: { schoolId: string; student
 	                    const balance = Number(computedDue || 0);
 	                    const monthlyFee = Number(feeSettings?.[selectedStudent.classId || ""]?.monthlyFee || summary?.baseFee || 0);
 	                    const busFee = Number(selectedStudent.bus?.fee || selectedStudent.bus?.fare || summary?.busFee || 0);
-	                    const showBusBreakdown = busFee > 0;
+	                    const showBusBreakdown = !!selectedStudent.transport_enabled;
 
 	                    // STEP 7 — VERIFY DATA FLOW
 	                    console.log("feeSettings:", feeSettings);
@@ -1424,7 +991,7 @@ const FeeUpdateForm = ({ schoolId, students, role }: { schoolId: string; student
 	              </div>
 	              {filteredStudents.map(s => {
 	                const sum = getFeeSummary(s, CURRENT_MONTH, ACADEMIC_YEAR);
-	                const isBusUser = s.bus?.opted === true;
+	                const isBusUser = !!s.transport_enabled;
 	                return (
                   <label key={s.id} className="flex items-center gap-4 p-3 bg-card border border-border rounded-xl cursor-pointer hover:bg-muted/30 transition-all group">
                     <input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleStudent(s.id)} className="w-4 h-4 rounded border-border text-primary focus:ring-primary/20 accent-primary" />

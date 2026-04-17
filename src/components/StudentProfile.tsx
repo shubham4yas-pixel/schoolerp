@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Student, ACADEMIC_MONTHS } from '@/lib/types';
 import { useStore } from '@/store/useStore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,7 +19,8 @@ import {
 } from '@/lib/data-utils';
 import PerformanceChart from './PerformanceChart';
 import { User, Calendar, Award, MessageSquare, TrendingUp, Sparkles, ArrowLeft, IndianRupee, Loader2, Bus, Save, Check, Printer, FileText, X, Camera } from 'lucide-react';
-import { firebaseConfig, storage, db } from '@/lib/firebase';
+import { firebaseConfig, storage, db } from '@/firebase';
+import { supabase } from '@/lib/supabase';
 import { doc, setDoc } from 'firebase/firestore';
 
 const sanitize = (obj: any) => JSON.parse(JSON.stringify(obj));
@@ -61,13 +63,13 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
   });
 
   // Local state for bus settings
-  const [busEnabled, setBusEnabled] = React.useState(student?.bus?.enabled || student?.bus?.opted || false);
+  const [busEnabled, setBusEnabled] = React.useState(!!student?.transport_enabled);
   const [busFee, setBusFee] = React.useState(String(student?.bus?.fee || '0'));
   const [busRouteId, setBusRouteId] = React.useState(student?.bus?.routeId || '');
   const [stopName, setStopName] = React.useState(student?.bus?.stopName || '');
 
   React.useEffect(() => {
-    setBusEnabled(student?.bus?.enabled || student?.bus?.opted || false);
+    setBusEnabled(!!student?.transport_enabled);
     setBusFee(String(student?.bus?.fee || '0'));
     setBusRouteId(student?.bus?.routeId || '');
     setStopName(student?.bus?.stopName || '');
@@ -105,10 +107,6 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
       return;
     }
 
-    console.log('FILE:', file);
-    console.log('SIZE:', file.size);
-    console.log('TYPE:', file.type);
-
     const previousPhotoURL = student.photoURL || photoPreviewURL || '';
     clearPreviewObjectUrl();
     const previewUrl = URL.createObjectURL(file);
@@ -120,16 +118,6 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
     setUploadProgress(0);
 
     try {
-      console.log('Uploading file:', file);
-      console.log('Size:', file.size);
-      console.log('Navigator online:', navigator.onLine);
-      console.log('Firebase storage bucket:', firebaseConfig.storageBucket);
-      console.log('Runtime project:', storage.app.options.projectId);
-      console.log(
-        'Expected upload endpoint:',
-        `https://firebasestorage.googleapis.com/v0/b/${firebaseConfig.storageBucket}/o`
-      );
-
       const downloadURL = await uploadProfileImage(
         file,
         student.id,
@@ -162,25 +150,47 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
     if (!schoolId || !student) return;
     setSavingBus(true);
     try {
-      const updatedBus = {
-        ...student.bus,
+      const busData = {
         enabled: busEnabled,
         opted: busEnabled,
         fee: parseFloat(busFee) || 0,
-        routeId: busRouteId,
-        stopName: stopName
+        routeId: busEnabled ? busRouteId : '',
+        stopName: busEnabled ? stopName : ''
       };
+
+      // 1. Update Firebase
       await setDoc(
         doc(db, 'schools', schoolId, 'students', student.id),
-        { bus: updatedBus },
+        { 
+          transport_enabled: busEnabled,
+          bus: busData
+        },
         { merge: true }
       );
-      toast.success('Transport settings updated');
+
+      // 2. Update Supabase
+      const { error: supError } = await supabase
+        .from('students')
+        .update({
+          transport_enabled: busEnabled,
+          bus_fee: busData.fee,
+          bus_route: busData.routeId,
+          bus_stop: busData.stopName,
+          updated_at: new Date().toISOString()
+        })
+        .eq('school_id', schoolId)
+        .eq('roll_number', student.rollNumber || student.id);
+
+      if (supError) console.error('Supabase sync for bus failed:', supError);
+
+      await fetchStudents(schoolId);
+      toast.success('Transport settings updated successfully');
     } catch (err) {
-      console.error('Transport Save Error FULL:', err);
+      console.error('Transport Save Error:', err);
       toast.error('Failed to update transport settings');
+    } finally {
+      setSavingBus(false);
     }
-    setSavingBus(false);
   };
 
   const subjects = React.useMemo(() => {
@@ -233,7 +243,6 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
 
   // Guard: if no student data at all, show fallback
   if (!student) {
-
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
@@ -259,11 +268,11 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
   const selectedReceiptTransaction = receiptTransactions.find(payment => payment.id === receiptPaymentId) || receiptTransactions[receiptTransactions.length - 1] || null;
   const receiptSummary = getFeeSummary(student as any, receiptMonth, ACADEMIC_YEAR);
 
-  // 3. DERIVE FEE
   const displayTotalFee = Number(pendingStatus?.monthlyFee || 0);
   const displayPaidAmount = Number(pendingStatus?.paid || 0);
   const displayPending = Number(pendingStatus?.due || 0);
   const displayStatus = pendingStatus?.status || 'unpaid';
+  
   const formatPaymentMonth = (monthName: string) => {
     const academicMonthIndex = ACADEMIC_MONTHS.findIndex(entry => entry.name === monthName);
     const academicStartYear = Number(ACADEMIC_YEAR.split('-')[0] || new Date().getFullYear());
@@ -366,7 +375,7 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
       <div className="bg-card rounded-xl border border-border p-5">
         <h3 className="font-display font-semibold text-foreground mb-4">Financial Overview</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <StatCard label="Monthly Fee (Total)" value={`₹${displayTotalFee}`} icon={IndianRupee} trend={(student?.bus?.enabled || student?.bus?.opted) ? `Includes ₹${student?.bus?.fee || student?.bus?.fare || feeConfigs.find(c => normalizeClassString(c.classId) === normalizeClassString(student.classId))?.transportFee || 0} Bus` : ''} />
+          <StatCard label="Monthly Fee (Total)" value={`₹${displayTotalFee}`} icon={IndianRupee} trend={student?.transport_enabled ? `Includes ₹${student?.bus?.fee || student?.bus?.fare || feeConfigs.find(c => normalizeClassString(c.classId) === normalizeClassString(student.classId))?.transportFee || 0} Bus` : ''} />
           <StatCard label="Paid Amount" value={`₹${displayPaidAmount}`} icon={IndianRupee} variant="success" />
           <div className="relative group">
             <StatCard label="Pending Due" value={`₹${displayPending}`} icon={IndianRupee} variant={displayStatus === 'paid' ? 'success' : 'destructive'} />
@@ -558,7 +567,7 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
         </div>
       )}
 
-      {/* Payment History - Strictly from global payments collection */}
+      {/* Payment History */}
       {studentPayments.length > 0 && (
         <div className="bg-card rounded-xl border border-border p-5">
           <h3 className="font-display font-semibold text-foreground mb-4">Payment History ({ACADEMIC_YEAR})</h3>
@@ -639,118 +648,229 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
       )}
 
       {/* Receipt Modal Overlay */}
-      <AnimatePresence>
-        {showReceipt && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4 print:p-0 print:bg-white"
-          >
-            <motion.div
-              initial={{ scale: 0.95, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="bg-card w-full max-w-md border border-border rounded-3xl shadow-2xl overflow-hidden print:border-none print:shadow-none print:max-w-none"
-            >
-              <div className="p-6 border-b border-border flex items-center justify-between print:hidden">
-                <h3 className="font-display font-bold text-foreground">Fee Payment Receipt</h3>
-                <button onClick={() => setShowReceipt(false)} className="p-2 hover:bg-muted rounded-xl transition-colors">
-                  <X className="w-5 h-5 text-muted-foreground" />
-                </button>
-              </div>
-
-              <div id="receipt-content" className="p-8 font-sans text-gray-900 bg-white">
-                <div className="text-center mb-8">
-                  <h1 className="text-2xl font-black text-indigo-900 uppercase tracking-tighter mb-1">SchoolPulse ERP</h1>
-                  <p className="text-[10px] font-bold text-indigo-600/60 uppercase tracking-[0.3em]">Official Educational Receipt</p>
-                  <div className="mt-4 border-b-2 border-indigo-900 w-20 mx-auto" />
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex justify-between items-start">
-                    <div className="space-y-1">
-                      <p className="text-[10px] font-black text-gray-400 uppercase">Receipt For</p>
-                      <p className="text-lg font-bold text-gray-900">{student.name}</p>
-                      <p className="text-xs font-bold text-gray-500 uppercase">{getClassName(student.classId, storeClasses)} - {student.section}</p>
+      {showReceipt && createPortal(
+        <AnimatePresence>
+          {showReceipt && (
+          <>
+            <style dangerouslySetInnerHTML={{ __html: `
+              @media print {
+                @page { 
+                   size: A4; 
+                   margin: 0; 
+                }
+                body { 
+                   margin: 0 !important; 
+                   padding: 0 !important;
+                }
+                body > *:not(#receipt-overlay-root) {
+                  display: none !important;
+                }
+                #receipt-overlay-root {
+                  display: block !important;
+                  width: 100% !important;
+                  height: auto !important;
+                  margin: 0 !important;
+                  padding: 0 !important;
+                }
+                #receipt-content-to-print {
+                  display: block !important;
+                  width: 210mm !important; /* A4 Width */
+                  min-height: 148mm !important; /* Half A4 is enough for receipt */
+                  border: none !important;
+                  box-shadow: none !important;
+                  margin: 0 auto !important;
+                  padding: 10mm !important;
+                  break-inside: avoid !important;
+                }
+                .no-print { display: none !important; }
+              }
+            `}} />
+            <div id="receipt-overlay-root">
+              <motion.div
+                id="receipt-overlay"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 print:p-0 print:bg-white print:static print:block"
+              >
+                <motion.div
+                  id="receipt-content-to-print"
+                  initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  className="bg-white w-full max-w-[850px] border border-border rounded-3xl shadow-2xl overflow-hidden print:rounded-none print:max-w-none print:shadow-none"
+                >
+                  <div className="p-4 bg-muted/30 border-b border-border flex items-center justify-between print:hidden">
+                    <div className="flex items-center gap-2">
+                       <FileText className="w-5 h-5 text-primary" />
+                       <h3 className="font-display font-bold text-foreground text-sm uppercase tracking-widest">Fee Receipt Preview</h3>
                     </div>
-                    <div className="text-right space-y-1">
-                      <p className="text-[10px] font-black text-gray-400 uppercase">Transaction ID</p>
-                      <p className="text-xs font-mono font-bold text-gray-900">{selectedReceiptTransaction?.id || 'N/A'}</p>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={() => window.print()}
+                            className="h-9 px-4 bg-primary text-white text-xs font-black uppercase rounded-xl hover:opacity-90 transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
+                        >
+                            <Printer className="w-4 h-4" /> Print Receipt
+                        </button>
+                        <button onClick={() => setShowReceipt(false)} className="h-9 w-9 flex items-center justify-center hover:bg-muted rounded-xl transition-colors">
+                            <X className="w-5 h-5 text-muted-foreground" />
+                        </button>
                     </div>
                   </div>
 
-                  <div className="bg-gray-50 rounded-2xl p-6 border border-gray-100">
-                    <div className="grid grid-cols-2 gap-y-4">
+                  <div className="p-12 print:p-8 font-sans text-slate-900 bg-white">
+                    <div className="flex justify-between items-start mb-10 pb-8 border-b-2 border-slate-100">
                       <div>
-                        <p className="text-[10px] font-black text-gray-400 uppercase">Billing Month</p>
-                        <p className="text-sm font-bold text-gray-900">{receiptMonth}</p>
+                        <div className="flex items-center gap-2 mb-2">
+                            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center">
+                                <Sparkles className="w-6 h-6 text-white" />
+                            </div>
+                            <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Schooler</h1>
+                        </div>
+                        <p className="text-[12px] font-black text-indigo-600 uppercase tracking-[0.4em] ml-1">Official Payment Voucher</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-[10px] font-black text-gray-400 uppercase">Status</p>
-                        <p className="text-sm font-black text-green-600 uppercase">Successful</p>
+                        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 inline-block">
+                            <p className="text-[10px] font-black text-slate-400 uppercase mb-0.5">Transaction ID</p>
+                            <p className="text-sm font-mono font-bold text-slate-800">{selectedReceiptTransaction?.id || 'TRX-PENDING'}</p>
+                            <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase italic">Generated via SchoolPulse ERP</p>
+                        </div>
                       </div>
-                      <div className="col-span-2 border-t border-gray-200 pt-4 mt-2">
-                        <div className="flex justify-between items-center bg-indigo-900 text-white rounded-xl p-4 shadow-xl">
-                          <div>
-                            <div className="mb-2 pb-2 border-b border-white/10">
-                              <p className="text-[10px] font-black uppercase opacity-60">Total Amount (₹)</p>
-                              <p className="text-sm font-bold opacity-90">₹{receiptSummary.totalFee}</p>
+                    </div>
+
+                    <div className="grid grid-cols-12 gap-10">
+                      <div className="col-span-12 md:col-span-7 space-y-8">
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Recipient Details</p>
+                          <div className="space-y-1">
+                            <p className="text-3xl font-black text-slate-900 leading-tight">{student.name}</p>
+                            <div className="flex items-center gap-3">
+                                <span className="text-sm font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg uppercase">
+                                    {getClassName(student.classId, storeClasses)} · {student.section}
+                                </span>
+                                <span className="text-sm font-black text-slate-400 uppercase tracking-widest">Roll: {student.rollNumber || student.id}</span>
                             </div>
-                            <p className="text-[10px] font-black uppercase opacity-60">Total Amount Paid</p>
-                            <p className="text-2xl font-black">₹{receiptSummary.paid}</p>
                           </div>
-                          <div className="bg-white/20 px-3 py-1 rounded-lg text-[10px] font-black">
-                            {receiptSummary.status === 'paid' ? 'PAID IN FULL' : receiptSummary.paid > 0 ? 'PARTIAL PAYMENT' : 'NO PAYMENT'}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-8 py-8 border-y-2 border-slate-50">
+                          <div>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Billing Period</p>
+                            <p className="text-lg font-black text-slate-800">{receiptMonth} {ACADEMIC_YEAR.split('-')[0]}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Payment Status</p>
+                            <div className="flex items-center gap-2">
+                                <div className={`w-2.5 h-2.5 rounded-full ${receiptSummary.status === 'paid' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]'}`} />
+                                <p className={`text-lg font-black uppercase tracking-tight ${receiptSummary.status === 'paid' ? 'text-green-600' : 'text-amber-600'}`}>
+                                    {receiptSummary.status === 'paid' ? 'Fully Settled' : 'Partial Payment'}
+                                </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="pt-2">
+                          <p className="text-[11px] font-bold text-slate-500 italic max-w-sm">
+                            "Education is the most powerful weapon which you can use to change the world."
+                          </p>
+                          <div className="mt-8 flex gap-4">
+                             <div className="flex-1">
+                                <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mb-6">Parent Signature</p>
+                                <div className="border-b border-slate-200 w-32" />
+                             </div>
+                             <div className="flex-1">
+                                <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mb-6">Accountant Seal</p>
+                                <div className="border-b border-slate-200 w-32" />
+                             </div>
                           </div>
                         </div>
                       </div>
-                      <div className="col-span-2 space-y-2">
-                        <p className="text-[10px] font-black text-gray-400 uppercase">Transactions</p>
-                        {receiptTransactions.length > 0 ? receiptTransactions.map(payment => (
-                          <div key={payment.id} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-3 py-2">
-                          <div>
-                            <p className="text-xs font-bold text-gray-900">₹{Number(payment.amount || payment.totalPaid || 0)}</p>
-                              <p className="text-[10px] font-medium text-gray-400">{new Date(payment.paidAt || payment.timestamp || payment.updatedAt || payment.date).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</p>
+
+                      <div className="col-span-12 md:col-span-5">
+                        <div className="bg-slate-900 text-white rounded-[2rem] p-8 shadow-2xl relative overflow-hidden h-full flex flex-col justify-between">
+                          <div className="relative z-10 space-y-8">
+                            <div>
+                                <h4 className="text-[11px] font-black uppercase text-indigo-400 tracking-[0.2em] mb-4">Financial Summary</h4>
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center opacity-60">
+                                        <span className="text-xs font-bold uppercase tracking-wider">Base Tuition</span>
+                                        <span className="text-sm font-black italic tracking-tight">₹{receiptSummary.baseFee.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center opacity-60">
+                                        <span className="text-xs font-bold uppercase tracking-wider">Transport Fee</span>
+                                        <span className="text-sm font-black italic tracking-tight">₹{receiptSummary.busFee.toLocaleString()}</span>
+                                    </div>
+                                    <div className="h-px bg-white/10 my-4" />
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-xs font-black uppercase tracking-widest text-indigo-300">Total Monthly Fee</span>
+                                        <span className="text-xl font-black italic tracking-tighter text-indigo-100">₹{receiptSummary.totalFee.toLocaleString()}</span>
+                                    </div>
+                                </div>
                             </div>
-                            <p className="text-[10px] font-black uppercase text-gray-500">{payment.month}</p>
+
+                            <div className="pt-8">
+                                <div className="bg-white/10 rounded-2xl p-5 border border-white/5 backdrop-blur-sm">
+                                    <p className="text-[10px] font-black uppercase text-indigo-300 tracking-[0.2em] mb-1.5">Amount Paid Now</p>
+                                    <div className="flex items-baseline gap-1">
+                                        <span className="text-sm font-bold text-white/60 italic tracking-tighter">₹</span>
+                                        <span className="text-4xl font-black tracking-tighter text-white drop-shadow-lg">{receiptSummary.paid.toLocaleString()}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <p className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Transaction History</p>
+                                <div className="space-y-2">
+                                    {receiptTransactions.length > 0 ? receiptTransactions.map((payment, idx) => (
+                                      <div key={payment.id} className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-2 text-[11px] border border-white/5">
+                                        <div>
+                                          <p className="font-black text-white italic">₹{Number(payment.amount || 0).toLocaleString()}</p>
+                                          <p className="text-[9px] font-bold text-white/40">
+                                            {formatPaymentTimestamp(payment.paidAt || payment.timestamp || payment.date)}
+                                          </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="px-2 py-0.5 bg-white/10 rounded-full font-black text-[8px] uppercase">{payment.month} ({idx + 1})</span>
+                                        </div>
+                                      </div>
+                                    )) : (
+                                      <p className="text-[10px] italic text-white/30 text-center py-4">No payments found.</p>
+                                    )}
+                                </div>
+                            </div>
                           </div>
-                        )) : (
-                          <p className="text-xs font-medium text-gray-400">No transactions recorded for this month.</p>
-                        )}
+                          
+                          <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full -mr-24 -mt-24 pointer-events-none" />
+                          <div className="absolute bottom-0 left-0 w-32 h-32 bg-indigo-500/10 rounded-full -ml-16 -mb-16 pointer-events-none" />
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="space-y-1 text-center pt-6">
-                    <p className="text-xs font-bold text-gray-900 italic">"Empowering the next generation of thinkers."</p>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">School Management Copy</p>
-                  </div>
-
-                  <div className="pt-10 flex justify-between items-end border-t border-dashed border-gray-200">
-                    <div className="space-y-1">
-                      <div className="w-32 h-1 bg-gray-200 mb-2" />
-                      <p className="text-[10px] font-black text-gray-400 uppercase">Accountant Signature</p>
+                    <div className="mt-12 pt-8 border-t border-slate-100 flex justify-between items-center">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center border border-slate-100">
+                                <Sparkles className="w-6 h-6 text-slate-200" />
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Date of Issue</p>
+                                <p className="text-sm font-black text-slate-800 uppercase italic">
+                                    {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-[9px] font-bold text-slate-300 mb-1 italic">Scan for authenticity</p>
+                            <div className="w-10 h-10 border border-slate-100 rounded bg-slate-50 mx-auto opacity-40 ml-auto" />
+                        </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[10px] font-black text-gray-400 uppercase">Payment Date</p>
-                      <p className="text-xs font-bold text-gray-900">{new Date(selectedReceiptTransaction?.paidAt || selectedReceiptTransaction?.timestamp || selectedReceiptTransaction?.updatedAt || Date.now()).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                    </div>
                   </div>
-                </div>
-              </div>
-
-              <div className="p-6 bg-muted border-t border-border flex items-center justify-center gap-4 print:hidden">
-                <button
-                  onClick={() => window.print()}
-                  className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-2xl text-sm font-bold hover:shadow-xl hover:shadow-primary/20 transition-all hover:-translate-y-0.5"
-                >
-                  <Printer className="w-4 h-4" /> Print / Download PDF
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                </motion.div>
+              </motion.div>
+            </div>
+          </>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 };

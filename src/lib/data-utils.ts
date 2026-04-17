@@ -154,7 +154,7 @@ const getMonthlyFeeBreakdown = (student: Student, feeSettingsOverride?: FeeSetti
     const classConfig = feeSettings?.[student.classId || ""];
     const config = feeConfigs.find(cfg => cfg.classId === student.classId);
     const baseFee = toAmount(classConfig?.monthlyFee || config?.totalFee || student.totalFees || 0);
-    const busEnabled = student.bus?.enabled || student.bus?.opted;
+    const busEnabled = !!student.transport_enabled;
     const busFee = busEnabled
         ? toAmount(
             student.bus?.fee ||
@@ -234,7 +234,21 @@ export function getStudentPendingStatus(
     (sum, payment) => sum + toAmount(payment.amount),
     0
   );
-    const expectedFee = totalFee * (normalizedCurrentMonthIndex + 1);
+    // ✅ IMMUTABILITY LOGIC: Calculate expected fee month-by-month
+    // Each month's expected fee is either what was recorded in its payments, or current fee.
+    let expectedFee = 0;
+    for (let i = 0; i <= normalizedCurrentMonthIndex; i++) {
+        const monthName = ACADEMIC_MONTHS[i].name;
+        const monthPayments = relevantTransactions.filter(p => p.month === monthName);
+        
+        if (monthPayments.length > 0) {
+            // Find highest amount_total recorded for this month or the most recent one
+            const recordedTarget = monthPayments.reduce((max, p) => Math.max(max, Number(p.amount_total || p.totalFee || 0)), 0);
+            expectedFee += (recordedTarget > 0 ? recordedTarget : totalFee);
+        } else {
+            expectedFee += totalFee;
+        }
+    }
     const due = Math.max(0, expectedFee - paid);
     const isPending = paid < expectedFee;
 
@@ -342,21 +356,22 @@ export function getFeeSummary(student: Student, month?: string, academicYearOver
     const monthlyTransactions = transactions.filter(
         t => t.month === effectiveMonth && normalizeAcademicYear(t.academicYear) === normalizeAcademicYear(effectiveAcademicYear)
     );
+    const targetFee = Number(monthlyTransactions[monthlyTransactions.length - 1]?.amount_total || totalFee);
     const paid = Math.min(
         monthlyTransactions.reduce(
             (sum, payment) => sum + toAmount(payment.amount),
             0
         ),
-        totalFee
+        targetFee
     );
-    const due = Math.max(0, totalFee - paid);
+    const due = Math.max(0, targetFee - paid);
     // Prevent overpayment logic issues
-    const cappedPaid = Math.min(paid, totalFee);
+    const cappedPaid = Math.min(paid, targetFee);
 
     let status: 'paid' | 'partial' | 'unpaid' = 'unpaid';
     if (cappedPaid === 0) {
         status = 'unpaid';
-    } else if (cappedPaid >= totalFee) {
+    } else if (cappedPaid >= targetFee) {
         status = 'paid';
     } else {
         status = 'partial';
@@ -365,12 +380,12 @@ export function getFeeSummary(student: Student, month?: string, academicYearOver
     return {
         baseFee,
         busFee,
-        totalFee,
+        totalFee: targetFee,
         paid: cappedPaid,
         due,
         status,
         month: effectiveMonth,
-        monthlyFee: totalFee,
+        monthlyFee: targetFee,
         transactions: monthlyTransactions,
         academicYear: effectiveAcademicYear,
     };

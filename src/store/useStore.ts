@@ -1,10 +1,11 @@
 import { create } from 'zustand';
-import { db, auth } from '@/lib/firebase';
+import { db, auth } from '@/firebase';
 import { collection, onSnapshot, query, setDoc, doc, deleteDoc, where, arrayUnion, getDoc, addDoc, updateDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as firebaseSignOut, onAuthStateChanged } from 'firebase/auth';
 import { Student, Mark, AttendanceRecord, Fee, BusRoute, Feedback, LoginCredential, FeeConfig, ExamConfig, SubjectConfig, ClassConfig, AppUser, Payment } from '@/lib/types';
 import { dedupeAttendanceRecords, getAttendanceDocId, normalizeAttendanceRecord, sanitize } from '@/lib/data-utils';
 import { supabase } from '@/lib/supabase';
+import { toast } from 'sonner';
 
 interface AppState {
     rawStudents: Student[];
@@ -61,6 +62,9 @@ interface AppState {
     fetchStudentsByClass: (schoolId: string, classId: string) => () => void;
     listenToClasses: (schoolId: string) => () => void;
     fetchStudents: (schoolId: string) => Promise<void>;
+    fetchClassesFromSupabase: (schoolId: string) => Promise<void>;
+    fetchSubjectsFromSupabase: (schoolId: string) => Promise<void>;
+    fetchExamsFromSupabase: (schoolId: string) => Promise<void>;
     syncStudentsToSupabase: (schoolId: string) => Promise<{ success: number; failed: number }>;
     initListeners: (schoolId: string) => () => void;
     setStudents: (students: Student[]) => void;
@@ -81,7 +85,11 @@ interface AppState {
     updateLoginCredential: (schoolId: string, credentialId: string, data: Partial<LoginCredential>) => Promise<void>;
     deleteLoginCredential: (schoolId: string, credentialId: string) => Promise<void>;
     updateExamPublishStatus: (schoolId: string, studentIds: string[], examId: string, isPublished: boolean) => Promise<void>;
+    fetchMarksFromSupabase: (schoolId?: string) => Promise<void>;
     setCurrentUser: (user: AppUser | null) => void;
+    deleteExamConfig: (schoolId: string, examId: string) => Promise<void>;
+    deleteSubjectConfig: (schoolId: string, subjectId: string) => Promise<void>;
+    deleteClassConfig: (schoolId: string, classId: string) => Promise<void>;
 }
 
 const assembleUnifiedMarks = (rawMarks: Mark[], students: Student[], exams: ExamConfig[], subjects: SubjectConfig[]): Mark[] => {
@@ -151,16 +159,22 @@ const augmentStudents = (rawStudents: Student[], classes: ClassConfig[], feeSett
 
         // STEP 2 — FEE SETTINGS LOOKUP
         const classFee = feeSettings?.[withClass.classId || ""]?.monthlyFee || 0;
+        const classTransportFee = feeSettings?.[withClass.classId || ""]?.transportFee || 0;
 
-        // STEP 3 — TOTAL FEE FALLBACK
-        const totalFees = withClass.totalFees && withClass.totalFees > 0
+        // STEP 3 — TOTAL FEE CALCULATION
+        const tuitionFee = withClass.totalFees && withClass.totalFees > 0
             ? Number(withClass.totalFees)
             : Number(classFee);
+        
+        const busEnabled = !!withClass.transport_enabled;
+        const busFee = busEnabled ? Number(withClass.bus?.fee || withClass.bus?.fare || classTransportFee) : 0;
+
+        const totalFees = tuitionFee + busFee;
 
         const paidAmount = withClass.paidAmount;
 
         // STEP 4 — DYNAMIC CALCULATION
-        const pendingFees = totalFees - paidAmount;
+        const pendingFees = Math.max(0, totalFees - paidAmount);
         
         let feeStatus: 'Paid' | 'Unpaid' | 'Partial' | 'Overpaid' = "Unpaid";
         if (paidAmount === 0) {
@@ -572,6 +586,89 @@ export const useStore = create<AppState>((set, get) => ({
         }
     },
 
+    // ─── Supabase fetch helpers ───────────────────────────────────────────────
+
+    fetchClassesFromSupabase: async (schoolId) => {
+        try {
+            const { data, error } = await supabase
+                .from('classes')
+                .select('*')
+                .eq('school_id', schoolId)
+                .order('order', { ascending: true });
+            if (error) throw error;
+            const rawClasses = (data || []).map((r: any) => ({
+                id: r.id,
+                classId: r.id,
+                name: r.name,
+                order: r.order ?? 0,
+                sections: r.sections ?? [],
+            } as ClassConfig));
+            const classes = Array.from(new Map(rawClasses.map(c => [c.name, c])).values());
+            set(state => ({
+                classes,
+                students: augmentStudents(state.rawStudents, classes, state.feeSettings),
+                loading: { ...state.loading, classes: false },
+            }));
+        } catch (err) {
+            console.error('fetchClassesFromSupabase failed:', err);
+            set(state => ({ loading: { ...state.loading, classes: false } }));
+        }
+    },
+
+    fetchSubjectsFromSupabase: async (schoolId) => {
+        try {
+            const { data, error } = await supabase
+                .from('subjects')
+                .select('*')
+                .eq('school_id', schoolId);
+            if (error) throw error;
+            const subjects = (data || []).map((r: any) => ({
+                id: r.id,
+                subjectId: r.id,
+                name: r.name,
+                classIds: r.class_ids ?? [],
+            } as SubjectConfig));
+            set(state => ({
+                subjects,
+                marks: assembleUnifiedMarks(state.rawMarks, state.students, state.exams, subjects),
+                loading: { ...state.loading, subjects: false },
+            }));
+        } catch (err) {
+            console.error('fetchSubjectsFromSupabase failed:', err);
+            set(state => ({ loading: { ...state.loading, subjects: false } }));
+        }
+    },
+
+    fetchExamsFromSupabase: async (schoolId) => {
+        try {
+            const { data, error } = await supabase
+                .from('exams')
+                .select('*')
+                .eq('school_id', schoolId)
+                .order('order', { ascending: true });
+            if (error) throw error;
+            const exams = (data || []).map((r: any) => ({
+                id: r.id,
+                examId: r.id,
+                name: r.name,
+                order: r.order ?? 0,
+                examDate: r.exam_date ?? undefined,
+                resultDate: r.result_date ?? undefined,
+                isPublished: r.is_published ?? false,
+            } as ExamConfig));
+            set(state => ({
+                exams,
+                marks: assembleUnifiedMarks(state.rawMarks, state.students, exams, state.subjects),
+                loading: { ...state.loading, exams: false },
+            }));
+        } catch (err) {
+            console.error('fetchExamsFromSupabase failed:', err);
+            set(state => ({ loading: { ...state.loading, exams: false } }));
+        }
+    },
+
+    // ─── Config saves (Supabase) ──────────────────────────────────────────────
+
     saveFeeConfig: async (schoolId, config) => {
         if (!db) return;
         if (!navigator.onLine) {
@@ -587,40 +684,99 @@ export const useStore = create<AppState>((set, get) => ({
     },
 
     saveExamConfig: async (schoolId, exam) => {
-        if (!db) return;
-        if (!navigator.onLine) {
-            alert("No internet connection");
-            return;
-        }
         try {
-            await setDoc(doc(db, 'schools', schoolId, 'config', 'academic', 'exams', exam.id), sanitize(exam));
+            const { error } = await supabase.from('exams').upsert({
+                id: exam.id,
+                school_id: schoolId,
+                name: exam.name,
+                order: exam.order ?? 0,
+                exam_date: exam.examDate ?? null,
+                result_date: exam.resultDate ?? null,
+                is_published: exam.isPublished ?? false,
+            }, { onConflict: 'id' });
+            if (error) throw error;
+            await get().fetchExamsFromSupabase(schoolId);
         } catch (error) {
-            console.error("Firestore Error:", error);
-            alert("Something went wrong. Please try again.");
+            console.error("saveExamConfig error:", error);
+            toast.error("Failed to save exam");
         }
     },
 
     saveSubjectConfig: async (schoolId, subject) => {
-        if (!db) return;
-        if (!navigator.onLine) {
-            alert("No internet connection");
-            return;
-        }
         try {
-            await setDoc(doc(db, 'schools', schoolId, 'config', 'academic', 'subjects', subject.id), sanitize(subject));
+            const { error } = await supabase.from('subjects').upsert({
+                id: subject.id,
+                school_id: schoolId,
+                name: subject.name,
+                class_ids: subject.classIds ?? [],
+            }, { onConflict: 'id' });
+            if (error) throw error;
+            await get().fetchSubjectsFromSupabase(schoolId);
         } catch (error) {
-            console.error("Firestore Error:", error);
-            alert("Something went wrong. Please try again.");
+            console.error("saveSubjectConfig error:", error);
+            toast.error("Failed to save subject");
         }
     },
 
     saveClassConfig: async (schoolId, classConfig) => {
-        if (!db) return;
         try {
-            await setDoc(doc(db, 'schools', schoolId, 'classes', classConfig.id), sanitize(classConfig));
+            const { error } = await supabase.from('classes').upsert({
+                id: classConfig.id,
+                school_id: schoolId,
+                name: classConfig.name,
+                order: classConfig.order ?? 0,
+                sections: classConfig.sections ?? [],
+            }, { onConflict: 'id' });
+            if (error) throw error;
+            await get().fetchClassesFromSupabase(schoolId);
         } catch (error) {
-            console.error("Firestore Error:", error);
-            alert("Something went wrong. Please try again.");
+            console.error("saveClassConfig error:", error);
+            toast.error("Failed to save class");
+        }
+    },
+
+    deleteExamConfig: async (schoolId, examId) => {
+        try {
+            const { error } = await supabase
+                .from('exams')
+                .delete()
+                .eq('id', examId)
+                .eq('school_id', schoolId);
+            if (error) throw error;
+            await get().fetchExamsFromSupabase(schoolId);
+        } catch (error) {
+            console.error("deleteExamConfig error:", error);
+            toast.error("Failed to delete exam");
+        }
+    },
+
+    deleteSubjectConfig: async (schoolId, subjectId) => {
+        try {
+            const { error } = await supabase
+                .from('subjects')
+                .delete()
+                .eq('id', subjectId)
+                .eq('school_id', schoolId);
+            if (error) throw error;
+            await get().fetchSubjectsFromSupabase(schoolId);
+        } catch (error) {
+            console.error("deleteSubjectConfig error:", error);
+            toast.error("Failed to delete subject");
+        }
+    },
+
+    deleteClassConfig: async (schoolId, classId) => {
+        try {
+            const { error } = await supabase
+                .from('classes')
+                .delete()
+                .eq('id', classId)
+                .eq('school_id', schoolId);
+            if (error) throw error;
+            await get().fetchClassesFromSupabase(schoolId);
+        } catch (error) {
+            console.error("deleteClassConfig error:", error);
+            toast.error("Failed to delete class");
         }
     },
 
@@ -628,36 +784,78 @@ export const useStore = create<AppState>((set, get) => ({
       try {
         const now = new Date().toISOString();
 
+        // ─── STEP 1: Fetch existing publish status if record exists ───
+        const { data: existingMark } = await supabase
+          .from('marks')
+          .select('is_published')
+          .eq('school_id', schoolId)
+          .eq('student_id', studentId)
+          .eq('exam_type', examId)
+          .eq('subject', subjectId)
+          .maybeSingle();
+
+        // ─── STEP 2: Upsert mark (ensures no duplicate key conflict) ───
         const { error } = await supabase
           .from('marks')
-          .upsert(
-            [
-              {
-                id: `${studentId}_${examId}_${subjectId}`,
-                school_id: schoolId,
-                student_id: studentId,
-                subject: subjectId,
-                exam_type: examId,
-                marks_obtained: Number(marks),
-                total_marks: 100,
-                date: now,
-              }
-            ],
-            {
-              onConflict: 'student_id,exam_type,subject'
-            }
-          );
+          .upsert([{
+            id: `${studentId}_${examId}_${subjectId}`,
+            school_id: schoolId,
+            student_id: studentId,
+            subject: subjectId,
+            exam_type: examId,
+            marks_obtained: Number(marks),
+            total_marks: 100,
+            date: now,
+            is_published: existingMark?.is_published ?? false
+          }]);
 
         if (error) {
-          console.error("Marks insert failed:", error);
-          alert("Failed to save marks");
-          return;
+          console.error("Marks upsert failed:", error);
+          throw error;
         }
 
+        // ─── STEP 3: Refresh state ───
+        await get().fetchMarksFromSupabase(schoolId);
+
       } catch (error) {
-        console.error("Marks error:", error);
-        alert("Something went wrong. Please try again.");
+        console.error("Marks update error:", error);
+        throw error;
       }
+    },
+
+    fetchMarksFromSupabase: async (schoolId?: string) => {
+        try {
+            let query = supabase.from('marks').select('*');
+            if (schoolId) query = query.eq('school_id', schoolId);
+            
+            const { data, error } = await query;
+            if (error) throw error;
+
+            const subjectsMap = new Map(get().subjects.map(s => [s.id, s.name]));
+            const examsMap = new Map(get().exams.map(e => [e.id, e.name]));
+
+            const rawMarks: Mark[] = (data || []).map((m: any) => ({
+                id: m.id,
+                studentId: m.student_id,
+                subject: subjectsMap.get(m.subject) || m.subject,
+                examType: (examsMap.get(m.exam_type) || m.exam_type) as any,
+                marksObtained: Number(m.marks_obtained),
+                totalMarks: Number(m.total_marks || 100),
+                date: m.date,
+                isPublished: m.is_published,
+                subjectId: m.subject, // Store raw ID for lookup
+                examId: m.exam_type   // Store raw ID for lookup
+            }));
+
+            set(state => ({ 
+                rawMarks, 
+                marks: assembleUnifiedMarks(rawMarks, state.students, state.exams, state.subjects),
+                loading: { ...state.loading, marks: false } 
+            }));
+        } catch (err) {
+            console.error('fetchMarksFromSupabase failed:', err);
+            set(state => ({ loading: { ...state.loading, marks: false } }));
+        }
     },
 
     logUploadRecord: async (schoolId, metadata) => {
@@ -746,9 +944,11 @@ export const useStore = create<AppState>((set, get) => ({
 
         if (error) {
           console.error("Publish update failed:", error);
-          alert("Failed to update publish status");
-          return;
+          throw error;
         }
+
+        // Refresh state
+        await get().fetchMarksFromSupabase(schoolId);
 
       } catch (error) {
         console.error("Publish error:", error);
@@ -796,13 +996,19 @@ export const useStore = create<AppState>((set, get) => ({
         // 2. Map and Upsert to Supabase
         // We'll process them in small batches or individually to be safe
         for (const s of firebaseStudents) {
+            // Guard: skip students without roll number and id
+            if (!s.rollNumber && !s.id) {
+                console.error('Skipping student without roll number:', s);
+                failed++;
+                continue;
+            }
             try {
                 const { error } = await supabase
                     .from('students')
                     .upsert({
-                        id: s.id.match(/^[0-9a-fA-F-]{36}$/) ? s.id : undefined, // only use if valid UUID
+                        // id: s.id.match(/^[0-9a-fA-F-]{36}$/) ? s.id : undefined, // only use if valid UUID
                         school_id: schoolId,
-                        roll_number: s.rollNumber || s.id,
+                        roll_number: String(s.rollNumber || s.id || '').trim(),
                         name: s.name || "Unknown",
                         class: s.class || s.className || "",
                         section: s.section || "",
@@ -812,7 +1018,7 @@ export const useStore = create<AppState>((set, get) => ({
                         paid_amount: Number(s.paidAmount || 0),
                         is_active: s.isActive !== false,
                         updated_at: new Date().toISOString()
-                    }, { onConflict: 'roll_number' });
+                    }, { onConflict: 'school_id,roll_number' });
 
                 if (error) {
                     console.error(`Sync failed for ${s.name}:`, error);
@@ -834,203 +1040,169 @@ export const useStore = create<AppState>((set, get) => ({
 
         // Force school_001 identity
         const schoolId = "school_001";
-    console.log(`Setting up listeners for school: ${schoolId}`);
+        console.log(`Setting up listeners for school: ${schoolId}`);
 
-    const marksQuery = query(collection(db, 'schools', schoolId, 'marks'));
-    const attendanceQuery = query(collection(db, 'schools', schoolId, 'attendance'));
-    const feedbacksQuery = query(collection(db, 'schools', schoolId, 'feedbacks'));
-    const feesQuery = query(collection(db, 'schools', schoolId, 'fees'));
-    const busQuery = query(collection(db, 'schools', schoolId, 'busRoutes'));
-    const feeConfigQuery = query(collection(db, 'schools', schoolId, 'config', 'feeStructure', 'classes'));
-    const examsQuery = query(collection(db, 'schools', schoolId, 'config', 'academic', 'exams'));
-    const subjectsQuery = query(collection(db, 'schools', schoolId, 'config', 'academic', 'subjects'));
+        const attendanceQuery = query(collection(db, 'schools', schoolId, 'attendance'));
+        const feedbacksQuery  = query(collection(db, 'schools', schoolId, 'feedbacks'));
+        const feesQuery       = query(collection(db, 'schools', schoolId, 'fees'));
+        const busQuery        = query(collection(db, 'schools', schoolId, 'busRoutes'));
+        const feeConfigQuery  = query(collection(db, 'schools', schoolId, 'config', 'feeStructure', 'classes'));
 
-    const unsubMarks = onSnapshot(marksQuery,
-      (snapshot) => {
-        const rawMarks = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as Mark));
-        set(state => ({ rawMarks, marks: assembleUnifiedMarks(rawMarks, state.students, state.exams, state.subjects), loading: { ...state.loading, marks: false } }));
-      },
-      (error) => {
-        console.error("Error in marks listener:", error);
-        set(state => ({ loading: { ...state.loading, marks: false } }));
-      }
-    );
-    const unsubAttendance = onSnapshot(
-      attendanceQuery,
-      (snapshot) => {
-        const attendance = dedupeAttendanceRecords(
-          snapshot.docs.map((doc) => ({
-            id: doc.id,
-            ...doc.data(),
-          })) as AttendanceRecord[]
+        // ── Marks (Supabase) ─────────────────────────────────────────────────
+        const unsubMarks = () => {};
+        get().fetchMarksFromSupabase(schoolId).catch(err => {
+            console.error('Initial marks fetch failed:', err);
+            set(state => ({ loading: { ...state.loading, marks: false } }));
+        });
+
+        // ── Classes (Supabase) ───────────────────────────────────────────────
+        const unsubClasses = () => {};
+        get().fetchClassesFromSupabase(schoolId).catch(err => {
+            console.error('Initial classes fetch failed:', err);
+            set(state => ({ loading: { ...state.loading, classes: false } }));
+        });
+
+        // ── Subjects (Supabase) ──────────────────────────────────────────────
+        const unsubSubjects = () => {};
+        get().fetchSubjectsFromSupabase(schoolId).catch(err => {
+            console.error('Initial subjects fetch failed:', err);
+            set(state => ({ loading: { ...state.loading, subjects: false } }));
+        });
+
+        // ── Exams (Supabase) ─────────────────────────────────────────────────
+        const unsubExams = () => {};
+        get().fetchExamsFromSupabase(schoolId).catch(err => {
+            console.error('Initial exams fetch failed:', err);
+            set(state => ({ loading: { ...state.loading, exams: false } }));
+        });
+
+        // ── Attendance (Firebase) ────────────────────────────────────────────
+        const unsubAttendance = onSnapshot(
+            attendanceQuery,
+            (snapshot) => {
+                const attendance = dedupeAttendanceRecords(
+                    snapshot.docs.map((doc) => ({
+                        id: doc.id,
+                        ...doc.data(),
+                    })) as AttendanceRecord[]
+                );
+                set((state) => ({
+                    attendance,
+                    loading: { ...state.loading, attendance: false },
+                }));
+            },
+            (error) => {
+                console.error("Attendance listener error:", error);
+            }
         );
 
-        set((state) => ({
-          attendance,
-          loading: {
-            ...state.loading,
-            attendance: false,
-          },
-        }));
-      },
-      (error) => {
-        console.error("Attendance listener error:", error);
-      }
-    );
-
-    // Payments are stored in Supabase, not Firestore — fetch once on init, then refreshed after each recordPayment
-    const unsubPayments = () => {}; // no-op unsubscriber (Firestore listener not used for payments)
-    // Kick off initial fetch from Supabase
-    get().fetchPaymentsFromSupabase(schoolId).catch(err => {
-      console.error('Initial payments fetch from Supabase failed:', err);
-      set(state => ({ loading: { ...state.loading, fees: false } }));
-    });
-
-    const unsubFeedbacks = onSnapshot(feedbacksQuery,
-      (snapshot) => {
-        const feedbacks = snapshot.docs
-          .map(doc => ({ ...doc.data(), id: doc.id } as any as Feedback))
-          .sort((a, b) => new Date(b.updatedAt || b.createdAt || b.date || 0).getTime() - new Date(a.updatedAt || a.createdAt || a.date || 0).getTime());
-        set({ feedbacks });
-      },
-      (error) => {
-        console.error("Error in feedback listener:", error);
-      }
-    );
-
-    const unsubFees = onSnapshot(feesQuery,
-      (snapshot) => {
-        const fees = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as Fee));
-        set(state => ({ fees, loading: { ...state.loading, fees: false } }));
-      },
-      (error) => {
-        console.error("Error in fees listener:", error);
-        set(state => ({ loading: { ...state.loading, fees: false } }));
-      }
-    );
-
-    const unsubBus = onSnapshot(busQuery,
-      (snapshot) => {
-        const busRoutes = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as BusRoute));
-        set(state => ({ busRoutes, loading: { ...state.loading, busRoutes: false } }));
-      },
-      (error) => {
-        console.error("Error in busRoutes listener:", error);
-        set(state => ({ loading: { ...state.loading, busRoutes: false } }));
-      }
-    );
-
-    const unsubFeeConfig = onSnapshot(feeConfigQuery,
-      (snapshot) => {
-        const feeConfigs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as FeeConfig));
-        
-        // Populate feeSettings lookup table
-        const feeSettingsData: Record<string, { monthlyFee: number; transportFee: number }> = {};
-        const state = get();
-        
-        feeConfigs.forEach(config => {
-          if (config.classId) {
-            feeSettingsData[config.classId] = {
-              monthlyFee: config.totalFee || 0,
-              transportFee: config.transportFee || (config.optionalCharges?.transport || 0),
-            };
-          }
+        // ── Payments (Supabase) ──────────────────────────────────────────────
+        const unsubPayments = () => {};
+        get().fetchPaymentsFromSupabase(schoolId).catch(err => {
+            console.error('Initial payments fetch from Supabase failed:', err);
+            set(state => ({ loading: { ...state.loading, fees: false } }));
         });
 
-        set(state => {
-          const newFeeSettings = feeSettingsData;
-          return { 
-            feeConfigs, 
-            feeSettings: newFeeSettings,
-            students: augmentStudents(state.rawStudents, state.classes, newFeeSettings), 
-            loading: { ...state.loading, feeConfigs: false } 
-          };
-        });
-      },
-      (error) => {
-        console.error("Error in feeConfig listener:", error);
-        set(state => ({ loading: { ...state.loading, feeConfigs: false } }));
-      }
-    );
+        // ── Feedbacks (Firebase) ─────────────────────────────────────────────
+        const unsubFeedbacks = onSnapshot(feedbacksQuery,
+            (snapshot) => {
+                const feedbacks = snapshot.docs
+                    .map(doc => ({ ...doc.data(), id: doc.id } as any as Feedback))
+                    .sort((a, b) => new Date(b.updatedAt || b.createdAt || b.date || 0).getTime() - new Date(a.updatedAt || a.createdAt || a.date || 0).getTime());
+                set({ feedbacks });
+            },
+            (error) => {
+                console.error("Error in feedback listener:", error);
+            }
+        );
 
-    const credsQuery = query(collection(db, 'schools', schoolId, 'credentials'));
-    const unsubCreds = onSnapshot(credsQuery,
-      (snapshot) => {
-        const loginCredentials = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as LoginCredential));
-        set(state => ({ loginCredentials, loading: { ...state.loading, credentials: false } }));
-      },
-      (error) => {
-        console.error("Error in credentials listener:", error);
-        set(state => ({ loading: { ...state.loading, credentials: false } }));
-      }
-    );
+        // ── Fees (Firebase) ──────────────────────────────────────────────────
+        const unsubFees = onSnapshot(feesQuery,
+            (snapshot) => {
+                const fees = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as Fee));
+                set(state => ({ fees, loading: { ...state.loading, fees: false } }));
+            },
+            (error) => {
+                console.error("Error in fees listener:", error);
+                set(state => ({ loading: { ...state.loading, fees: false } }));
+            }
+        );
 
-    const unsubExams = onSnapshot(examsQuery,
-      (snapshot) => {
-        const exams = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as ExamConfig));
-        set(state => ({ exams, marks: assembleUnifiedMarks(state.rawMarks, state.students, exams, state.subjects), loading: { ...state.loading, exams: false } }));
-      },
-      (error) => {
-        console.error("Error in exams listener:", error);
-        set(state => ({ loading: { ...state.loading, exams: false } }));
-      }
-    );
+        // ── Bus Routes (Firebase) ────────────────────────────────────────────
+        const unsubBus = onSnapshot(busQuery,
+            (snapshot) => {
+                const busRoutes = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as BusRoute));
+                set(state => ({ busRoutes, loading: { ...state.loading, busRoutes: false } }));
+            },
+            (error) => {
+                console.error("Error in busRoutes listener:", error);
+                set(state => ({ loading: { ...state.loading, busRoutes: false } }));
+            }
+        );
 
-    const unsubSubjects = onSnapshot(subjectsQuery,
-      (snapshot) => {
-        const subjects = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as SubjectConfig));
-        set(state => ({ subjects, marks: assembleUnifiedMarks(state.rawMarks, state.students, state.exams, subjects), loading: { ...state.loading, subjects: false } }));
-      },
-      (error) => {
-        console.error("Error in subjects listener:", error);
-        set(state => ({ loading: { ...state.loading, subjects: false } }));
-      }
-    );
-    const usersQuery = query(collection(db, 'users'));
-    const unsubUsers = onSnapshot(usersQuery,
-      (snapshot) => {
-        const users = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as AppUser));
-        set({ users, loading: { ...get().loading, users: false } });
-      },
-      (error) => {
-        console.error("Error in users listener:", error);
-        set(state => ({ loading: { ...state.loading, users: false } }));
-      }
-    );
+        // ── Fee Config (Firebase) ────────────────────────────────────────────
+        const unsubFeeConfig = onSnapshot(feeConfigQuery,
+            (snapshot) => {
+                const feeConfigs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as FeeConfig));
+                const feeSettingsData: Record<string, { monthlyFee: number; transportFee: number }> = {};
+                feeConfigs.forEach(config => {
+                    if (config.classId) {
+                        feeSettingsData[config.classId] = {
+                            monthlyFee: config.totalFee || 0,
+                            transportFee: config.transportFee || (config.optionalCharges?.transport || 0),
+                        };
+                    }
+                });
+                set(state => {
+                    const newFeeSettings = feeSettingsData;
+                    return {
+                        feeConfigs,
+                        feeSettings: newFeeSettings,
+                        students: augmentStudents(state.rawStudents, state.classes, newFeeSettings),
+                        loading: { ...state.loading, feeConfigs: false },
+                    };
+                });
+            },
+            (error) => {
+                console.error("Error in feeConfig listener:", error);
+                set(state => ({ loading: { ...state.loading, feeConfigs: false } }));
+            }
+        );
 
-    // Standard Class Listener
-    const classesQuery = query(collection(db, 'schools', schoolId, 'classes'));
-    const unsubClasses = onSnapshot(classesQuery,
-      (snapshot) => {
-        const rawClasses = snapshot.docs.map(doc => ({ 
-          ...doc.data(),
-          id: doc.id, 
-          classId: doc.id 
-        } as any as ClassConfig));
-        // Deduplicate classes by name in the store to prevent UI duplication issues
-        const classes = Array.from(new Map(rawClasses.map(c => [c.name, c])).values());
-        
-        console.log("CLASSES (Deduplicated):", classes);
-        set(state => ({
-          classes,
-          students: augmentStudents(state.rawStudents, classes, state.feeSettings),
-          loading: { ...state.loading, classes: false }
-        }));
-      },
-      (error) => {
-        console.error("Error in class listener (init):", error);
-        set(state => ({ loading: { ...state.loading, classes: false } }));
-      }
-    );
+        // ── Credentials (Firebase) ───────────────────────────────────────────
+        const credsQuery = query(collection(db, 'schools', schoolId, 'credentials'));
+        const unsubCreds = onSnapshot(credsQuery,
+            (snapshot) => {
+                const loginCredentials = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as LoginCredential));
+                set(state => ({ loginCredentials, loading: { ...state.loading, credentials: false } }));
+            },
+            (error) => {
+                console.error("Error in credentials listener:", error);
+                set(state => ({ loading: { ...state.loading, credentials: false } }));
+            }
+        );
 
-	        set({ initialized: true });
+        // ── Users (Firebase) ─────────────────────────────────────────────────
+        const usersQuery = query(collection(db, 'users'));
+        const unsubUsers = onSnapshot(usersQuery,
+            (snapshot) => {
+                const users = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any as AppUser));
+                set({ users, loading: { ...get().loading, users: false } });
+            },
+            (error) => {
+                console.error("Error in users listener:", error);
+                set(state => ({ loading: { ...state.loading, users: false } }));
+            }
+        );
 
-	        return () => {
-	            unsubMarks();
-	            unsubAttendance();
-	            unsubPayments();
-	            unsubFeedbacks();
-	            unsubFees();
+        set({ initialized: true });
+
+        return () => {
+            unsubMarks();
+            unsubAttendance();
+            unsubPayments();
+            unsubFeedbacks();
+            unsubFees();
             unsubBus();
             unsubCreds();
             unsubFeeConfig();
@@ -1041,30 +1213,14 @@ export const useStore = create<AppState>((set, get) => ({
         };
     },
 
-    listenToClasses: () => {
-        if (!db) return () => { };
+    listenToClasses: (_schoolId?: string) => {
+        // Supabase-backed: kick off an async fetch and return a no-op unsubscribe
         const schoolId = "school_001";
-        const q = query(collection(db, 'schools', schoolId, 'classes'));
-        console.log(`Setting up standalone classes listener for school: ${schoolId}`);
-        return onSnapshot(q, (snapshot) => {
-            const rawClasses = snapshot.docs.map((doc) => ({
-                ...doc.data(),
-                id: doc.id,
-                classId: doc.id,
-            } as any as ClassConfig));
-            
-            const mappedClasses = Array.from(new Map(rawClasses.map(c => [c.name, c])).values());
-            console.log("CLASSES (DeduplicatedStandalone):", mappedClasses);
-            
-            set(state => ({
-                classes: mappedClasses,
-                students: augmentStudents(state.rawStudents, mappedClasses, state.feeSettings),
-                loading: { ...state.loading, classes: false }
-            }));
-        }, (error) => {
-            console.error("Error in classes listener:", error);
-            set(state => ({ loading: { ...state.loading, classes: false } }));
+        console.log(`Fetching classes from Supabase for school: ${schoolId}`);
+        get().fetchClassesFromSupabase(schoolId).catch(err => {
+            console.error('listenToClasses (Supabase) failed:', err);
         });
+        return () => {}; // no active subscription to tear down
     },
 
     setCurrentUser: (currentUser) => set({

@@ -6,7 +6,7 @@ import { calculateFeeStatus } from '@/lib/data-utils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
-import { db } from '@/lib/firebase';
+import { db } from '@/firebase';
 import { doc, setDoc, collection, arrayUnion, addDoc } from 'firebase/firestore';
 import { supabase } from '@/lib/supabase';
 import { sanitize } from '@/lib/data-utils';
