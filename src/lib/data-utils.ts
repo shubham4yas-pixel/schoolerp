@@ -151,19 +151,12 @@ const sortTransactions = (left: Payment, right: Payment) => {
 const getMonthlyFeeBreakdown = (student: Student, feeSettingsOverride?: FeeSettingsMap) => {
     const { feeSettings: storeFeeSettings, feeConfigs } = useStore.getState();
     const feeSettings = feeSettingsOverride || storeFeeSettings;
-    const classConfig = feeSettings?.[student.classId || ""];
-    const config = feeConfigs.find(cfg => cfg.classId === student.classId);
+    const classId = student.classId || student.class || student.className || "";
+    const classConfig = feeSettings?.[classId];
+    const config = feeConfigs.find(cfg => cfg.classId === classId);
     const baseFee = toAmount(classConfig?.monthlyFee || config?.totalFee || student.totalFees || 0);
-    const busEnabled = !!student.transport_enabled;
-    const busFee = busEnabled
-        ? toAmount(
-            student.bus?.fee ||
-            student.bus?.fare ||
-            classConfig?.transportFee ||
-            config?.transportFee ||
-            config?.optionalCharges?.transport ||
-            0
-        )
+    const busFee = student.transport_enabled
+        ? toAmount(classConfig?.transportFee || config?.transportFee || 0)
         : 0;
 
     return {
@@ -351,7 +344,7 @@ export function getFeeSummary(student: Student, month?: string, academicYearOver
     const effectiveAcademicYear = academicYearOverride || academicYear;
     const { baseFee, busFee, totalFee } = getMonthlyFeeBreakdown(student);
     const transactions = getStudentPaymentTransactions(student.id, effectiveAcademicYear, effectiveMonth);
-    console.log("DEBUG payments for student:", student.id, transactions);
+
     // Ensure transactions are strictly for the selected month only (avoid cross-month aggregation issues)
     const monthlyTransactions = transactions.filter(
         t => t.month === effectiveMonth && normalizeAcademicYear(t.academicYear) === normalizeAcademicYear(effectiveAcademicYear)

@@ -47,7 +47,7 @@ const AdminDashboard = () => {
     globalFilterSection: compareSection, setGlobalFilterSection: setCompareSection,
     classes: storeClasses
   } = useStore();
-  const { role: userRole, setRole: setUserRole } = useAuth();
+  const { role: userRole, setRole: setUserRole, schoolId } = useAuth();
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
@@ -313,8 +313,8 @@ const AdminDashboard = () => {
       {activeTab === 'forms' && <DataEntryForms />}
       {activeTab === 'search' && <StudentSearch />}
       {activeTab === 'bus' && <BusManagement />}
-      {activeTab === 'academic_settings' && <AcademicSettings schoolId="school_001" />}
-      {activeTab === 'settings' && <FeeSettings schoolId="school_001" />}
+      {activeTab === 'academic_settings' && <AcademicSettings schoolId={schoolId} />}
+      {activeTab === 'settings' && <FeeSettings schoolId={schoolId} />}
       {activeTab === 'credentials' && <CredentialManager />}
 
       {activeTab === 'upload' && (

@@ -5,6 +5,7 @@ import ProfileErrorBoundary from '@/components/ProfileErrorBoundary';
 import PeerComparison from '@/components/PeerComparison';
 import BusManagement from '@/components/BusManagement';
 import FeedbackList from '@/components/FeedbackList';
+import ProfilePhotoWidget from '@/components/ProfilePhotoWidget';
 import { useAuth } from '@/contexts/AuthContext';
 import { useStore } from '@/store/useStore';
 import {
@@ -21,7 +22,8 @@ import { BookOpen, BarChart3, Bus, Search, MessageSquare, TrendingUp, Calendar, 
 type ParentTab = 'progress' | 'compare' | 'bus' | 'feedback';
 
 const ParentDashboard = () => {
-  const { schoolId, parentStudentId } = useAuth();
+  const { schoolId, parentStudentId, user } = useAuth();
+
   const { students, marks, attendance, loading, subjects: allSubjects } = useStore();
   const [activeTab, setActiveTab] = useState<ParentTab>('progress');
   const [feedbackSearch, setFeedbackSearch] = useState('');
@@ -53,19 +55,22 @@ const ParentDashboard = () => {
     return <AppLayout title="Parent Dashboard"><p className="text-muted-foreground">No student linked to this account.</p></AppLayout>;
   }
 
-  const overallPct = getOverallPercentage(student.id, marks);
+  // Parents only see published marks
+  const publishedMarks = marks.filter(m => m.isPublished);
+
+  const overallPct = getOverallPercentage(student.id, publishedMarks);
   const attPct = getAttendancePercentage(student.id, attendance);
-  const classRank = getClassRanking(student.id, students, marks);
+  const classRank = getClassRanking(student.id, students, publishedMarks);
+
+  const subjectPerformance = subjects.map(sub => ({
+    subject: sub,
+    average: getSubjectAverage(student.id, sub, publishedMarks),
+  })).filter(s => s.subject.toLowerCase().includes(subjectSearch.toLowerCase()));
 
   const filteredFeedback = feedback.filter(f =>
     (f.teacherName || "").toLowerCase().includes(feedbackSearch.toLowerCase()) ||
     (f.feedbackText || f.remark || "").toLowerCase().includes(feedbackSearch.toLowerCase())
   );
-
-  const subjectPerformance = subjects.map(sub => ({
-    subject: sub,
-    average: getSubjectAverage(student.id, sub, marks),
-  })).filter(s => s.subject.toLowerCase().includes(subjectSearch.toLowerCase()));
 
   const tabs: { id: ParentTab; label: string; icon: React.ReactNode }[] = [
     { id: 'progress', label: 'Progress', icon: <BookOpen className="w-4 h-4" /> },
@@ -76,6 +81,22 @@ const ParentDashboard = () => {
 
   return (
     <AppLayout title={`${student.name}'s Progress`}>
+      {/* Parent profile header */}
+      <div className="flex items-center gap-4 mb-6 p-4 bg-card border border-border rounded-2xl">
+        <ProfilePhotoWidget
+          name={user?.name || 'Parent'}
+          photoURL={user?.photoURL || ''}
+          size="w-14 h-14"
+          editable
+        />
+        <div className="flex-1 min-w-0">
+          <p className="font-display font-bold text-foreground truncate">{user?.name || 'Parent'}</p>
+          <p className="text-xs text-muted-foreground font-medium">
+            Viewing progress for <span className="font-semibold text-primary">{student.name}</span>
+          </p>
+        </div>
+      </div>
+
       <div className="flex flex-wrap gap-2 mb-6">
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)}

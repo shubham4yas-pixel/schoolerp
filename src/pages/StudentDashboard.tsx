@@ -5,6 +5,7 @@ import PeerComparison from '@/components/PeerComparison';
 import PerformanceChart from '@/components/PerformanceChart';
 import BusManagement from '@/components/BusManagement';
 import FeedbackList from '@/components/FeedbackList';
+import ProfilePhotoWidget from '@/components/ProfilePhotoWidget';
 import { useAuth } from '@/contexts/AuthContext';
 import { useStore } from '@/store/useStore';
 import {
@@ -54,11 +55,14 @@ const StudentDashboard = () => {
     return <AppLayout title="Student Dashboard"><p className="text-muted-foreground">No student linked to this account.</p></AppLayout>;
   }
 
-  const studentMarks = getStudentMarks(student.id, marks);
-  const overallPct = getOverallPercentage(student.id, marks);
+  // Students only see published marks
+  const publishedMarks = marks.filter(m => m.isPublished);
+
+  const studentMarks = getStudentMarks(student.id, publishedMarks);
+  const overallPct = getOverallPercentage(student.id, publishedMarks);
   const attendancePct = getAttendancePercentage(student.id, attendance);
-  const ranking = getClassRanking(student.id, students, marks);
-  const summaries = generateAISummary(student.id, students, marks, attendance, subjects);
+  const ranking = getClassRanking(student.id, students, publishedMarks);
+  const summaries = generateAISummary(student.id, students, publishedMarks, attendance, subjects);
 
   const filteredFeedback = feedback.filter(f =>
     (f.teacherName || "").toLowerCase().includes(feedbackSearch.toLowerCase()) ||
@@ -80,6 +84,24 @@ const StudentDashboard = () => {
 
   return (
     <AppLayout title={`Welcome, ${student.name.split(' ')[0]}`}>
+      {/* Student profile header card */}
+      <div className="flex items-center gap-4 mb-6 p-4 bg-card border border-border rounded-2xl">
+        <ProfilePhotoWidget
+          name={student.name}
+          photoURL={student.photoURL || ''}
+          size="w-14 h-14"
+          studentId={student.id}
+          schoolId={schoolId}
+          editable
+        />
+        <div className="flex-1 min-w-0">
+          <p className="font-display font-bold text-foreground truncate">{student.name}</p>
+          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+            Class {student.class} &bull; Section {student.section} &bull; Roll {student.rollNumber}
+          </p>
+        </div>
+      </div>
+
       <div className="flex gap-2 mb-6">
         {tabs.map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)}

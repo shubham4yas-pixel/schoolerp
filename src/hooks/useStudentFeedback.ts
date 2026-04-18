@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { db } from '@/firebase';
+import { supabase } from '@/lib/supabase';
 import { Feedback } from '@/lib/types';
 
 type UseStudentFeedbackOptions = {
@@ -27,17 +26,26 @@ const normalizeFeedback = (feedback: Partial<Feedback> & { id: string }): Feedba
   date: feedback.date || feedback.updatedAt || feedback.createdAt || '',
 });
 
+const mapFeedbackRow = (row: any): Feedback => normalizeFeedback({
+  id: String(row.id || ''),
+  studentId: String(row.student_id || row.studentId || ''),
+  class: row.class || '',
+  classId: row.class_id || row.classId || '',
+  section: row.section || '',
+  teacherId: row.teacher_id || row.teacherId || '',
+  teacherName: row.teacher_name || row.teacherName || 'Teacher',
+  examType: row.exam_type || row.examType || '',
+  feedbackText: row.feedback_text || row.feedbackText || '',
+  status: row.status || 'draft',
+  createdAt: row.created_at || row.createdAt || '',
+  updatedAt: row.updated_at || row.updatedAt || '',
+  category: row.category || undefined,
+  remark: row.remark || row.feedback_text || '',
+  date: row.date || '',
+});
+
 const getFeedbackSortTime = (feedback: Feedback) =>
   new Date(feedback.updatedAt || feedback.createdAt || feedback.date || 0).getTime();
-
-const getFeedbackKey = (feedback: Feedback) =>
-  [
-    feedback.studentId,
-    feedback.teacherId || feedback.teacherName || '',
-    feedback.examType || '',
-    feedback.feedbackText || feedback.remark || '',
-    feedback.date || feedback.createdAt || feedback.updatedAt || '',
-  ].join('__');
 
 export const useStudentFeedback = ({
   schoolId,
@@ -48,74 +56,47 @@ export const useStudentFeedback = ({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!db || !schoolId || !studentId) {
+    if (!schoolId || !studentId) {
       setFeedback([]);
       setLoading(false);
       return;
     }
 
-    let legacyFeedback: Feedback[] = [];
-    let currentFeedback: Feedback[] = [];
+    let cancelled = false;
 
-    const syncFeedback = () => {
-      const deduped = new Map<string, Feedback>();
+    const loadFeedback = async () => {
+      setLoading(true);
 
-      [...legacyFeedback, ...currentFeedback]
-        .map(normalizeFeedback)
-        .filter(entry => entry.studentId === studentId && (entry.feedbackText || entry.remark))
-        .forEach((entry) => {
-          const key = getFeedbackKey(entry);
-          const existing = deduped.get(key);
+      try {
+        let query = supabase
+          .from('feedbacks')
+          .select('*')
+          .eq('school_id', schoolId)
+          .eq('student_id', studentId);
 
-          if (!existing || getFeedbackSortTime(entry) >= getFeedbackSortTime(existing)) {
-            deduped.set(key, entry);
-          }
-        });
+        if (publishedOnly) {
+          query = query.eq('status', 'published');
+        }
 
-      const next = [...deduped.values()]
-        .filter(entry => !publishedOnly || entry.status === 'published')
-        .sort((left, right) => getFeedbackSortTime(right) - getFeedbackSortTime(left));
+        const { data, error } = await query;
+        if (error) throw error;
 
-      setFeedback(next);
-      setLoading(false);
+        if (!cancelled) {
+          const mapped = (data || []).map(mapFeedbackRow).sort((left, right) => getFeedbackSortTime(right) - getFeedbackSortTime(left));
+          setFeedback(mapped);
+        }
+      } catch (error) {
+        console.error('Failed to fetch feedback:', error);
+        if (!cancelled) setFeedback([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
 
-    const legacyQuery = query(
-      collection(db, 'schools', schoolId, 'feedback'),
-      where('studentId', '==', studentId),
-    );
-    const currentQuery = query(
-      collection(db, 'schools', schoolId, 'feedbacks'),
-      where('studentId', '==', studentId),
-    );
-
-    const unsubLegacy = onSnapshot(
-      legacyQuery,
-      (snapshot) => {
-        legacyFeedback = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Feedback));
-        syncFeedback();
-      },
-      (error) => {
-        console.error('Legacy feedback listener error:', error);
-        syncFeedback();
-      },
-    );
-
-    const unsubCurrent = onSnapshot(
-      currentQuery,
-      (snapshot) => {
-        currentFeedback = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Feedback));
-        syncFeedback();
-      },
-      (error) => {
-        console.error('Feedback listener error:', error);
-        syncFeedback();
-      },
-    );
+    void loadFeedback();
 
     return () => {
-      unsubLegacy();
-      unsubCurrent();
+      cancelled = true;
     };
   }, [schoolId, studentId, publishedOnly]);
 

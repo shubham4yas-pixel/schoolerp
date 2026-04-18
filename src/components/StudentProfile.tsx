@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Student, ACADEMIC_MONTHS } from '@/lib/types';
 import { useStore } from '@/store/useStore';
@@ -12,24 +12,19 @@ import {
   generateAISummary,
   getFeeSummary,
   getStudentPendingStatus,
-  normalizeClassString,
   getClassName,
   getAcademicContext,
   getStudentPaymentTransactions
 } from '@/lib/data-utils';
 import PerformanceChart from './PerformanceChart';
-import { User, Calendar, Award, MessageSquare, TrendingUp, Sparkles, ArrowLeft, IndianRupee, Loader2, Bus, Save, Check, Printer, FileText, X, Camera } from 'lucide-react';
-import { firebaseConfig, storage, db } from '@/firebase';
-import { supabase } from '@/lib/supabase';
-import { doc, setDoc } from 'firebase/firestore';
-
-const sanitize = (obj: any) => JSON.parse(JSON.stringify(obj));
+import { Calendar, Award, MessageSquare, TrendingUp, Sparkles, ArrowLeft, IndianRupee, Loader2, Bus, Save, Printer, FileText, X, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import StatCard from './StatCard';
 import FeedbackList from './FeedbackList';
 import useStudentFeedback from '@/hooks/useStudentFeedback';
 import StudentAvatar from './StudentAvatar';
 import { uploadProfileImage } from '@/lib/profileImageUpload';
+
 
 interface StudentProfileProps {
   student: Student;
@@ -39,8 +34,9 @@ interface StudentProfileProps {
 }
 
 const StudentProfile = ({ student: initialStudent, onBack, simplified = false, onFeedbackClick }: StudentProfileProps) => {
+  
   const { schoolId, role } = useAuth();
-  const { students, marks: allMarks, attendance, feeConfigs, feeSettings, loading, subjects: allSubjects, exams, classes: storeClasses, busRoutes, payments, fetchStudents } = useStore();
+  const { students, marks: allMarks, attendance, feeSettings, loading, subjects: allSubjects, exams, classes: storeClasses, busRoutes, payments, fetchStudents } = useStore();
   const [savingBus, setSavingBus] = React.useState(false);
   const [uploadingPhoto, setUploadingPhoto] = React.useState(false);
   const [uploadProgress, setUploadProgress] = React.useState(0);
@@ -50,30 +46,31 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
   const [showReceipt, setShowReceipt] = React.useState(false);
   const [receiptMonth, setReceiptMonth] = React.useState(() => getAcademicContext().currentMonth);
   const [receiptPaymentId, setReceiptPaymentId] = React.useState('');
+  // ─── Local bus draft state (only committed on Save button click) ───
+  const [draftBusEnabled, setDraftBusEnabled] = React.useState(initialStudent?.transport_enabled === true);
+  const [draftRouteId, setDraftRouteId] = React.useState(initialStudent?.bus?.routeId || initialStudent?.bus?.route || '');
+  const [draftStopName, setDraftStopName] = React.useState(initialStudent?.bus?.stopName || '');
+  const [draftBusFee, setDraftBusFee] = React.useState(0);
   const photoInputRef = React.useRef<HTMLInputElement | null>(null);
   const previewObjectUrlRef = React.useRef<string | null>(null);
 
   // Fetch student safely from store using current data
   const student = students.find(s => s.id === initialStudent?.id) || initialStudent;
   const studentId = student?.id || initialStudent?.id || '';
+
+
+
   const { feedback } = useStudentFeedback({
     schoolId,
     studentId,
     publishedOnly: role === 'parent' || role === 'student',
   });
 
-  // Local state for bus settings
-  const [busEnabled, setBusEnabled] = React.useState(!!student?.transport_enabled);
-  const [busFee, setBusFee] = React.useState(String(student?.bus?.fee || '0'));
-  const [busRouteId, setBusRouteId] = React.useState(student?.bus?.routeId || '');
-  const [stopName, setStopName] = React.useState(student?.bus?.stopName || '');
-
-  React.useEffect(() => {
-    setBusEnabled(!!student?.transport_enabled);
-    setBusFee(String(student?.bus?.fee || '0'));
-    setBusRouteId(student?.bus?.routeId || '');
-    setStopName(student?.bus?.stopName || '');
-  }, [student]);
+  const studentClassId = student?.classId || student?.class || student?.className || '';
+  const busEnabled = student?.transport_enabled === true;
+  const busFee = Number(feeSettings[studentClassId]?.transportFee || 0);
+  const busRouteId = student?.bus?.routeId || student?.bus?.route || '';
+  const stopName = student?.bus?.stopName || '';
 
   const clearPreviewObjectUrl = React.useCallback(() => {
     if (previewObjectUrlRef.current) {
@@ -81,6 +78,19 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
       previewObjectUrlRef.current = null;
     }
   }, []);
+
+  // Sync draft bus state whenever the student record changes from the store
+  React.useEffect(() => {
+    if (student) {
+      setDraftBusEnabled(student.transport_enabled === true);
+      setDraftRouteId(student.bus?.routeId || student.bus?.route || '');
+      setDraftStopName(student.bus?.stopName || '');
+    }
+  }, [student?.id, student?.transport_enabled, student?.bus?.routeId, student?.bus?.stopName]);
+
+  React.useEffect(() => {
+    setDraftBusFee(Number(feeSettings[studentClassId]?.transportFee || 0));
+  }, [studentClassId, feeSettings]);
 
   React.useEffect(() => {
     setPhotoPreviewURL(student?.photoURL || '');
@@ -150,40 +160,32 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
     if (!schoolId || !student) return;
     setSavingBus(true);
     try {
-      const busData = {
-        enabled: busEnabled,
-        opted: busEnabled,
-        fee: parseFloat(busFee) || 0,
-        routeId: busEnabled ? busRouteId : '',
-        stopName: busEnabled ? stopName : ''
-      };
+      const nextRouteId = draftBusEnabled ? draftRouteId : '';
+      const nextStopName = draftBusEnabled ? draftStopName : '';
 
-      // 1. Update Firebase
-      await setDoc(
-        doc(db, 'schools', schoolId, 'students', student.id),
-        { 
-          transport_enabled: busEnabled,
-          bus: busData
-        },
-        { merge: true }
-      );
+      // 1. Save transport enabled / route / stop to the student record
+      const { updateStudentTransport, saveFeeConfig, feeConfigs } = useStore.getState();
+      await updateStudentTransport(schoolId, student.id, {
+        transport_enabled: draftBusEnabled,
+        bus_route_id: nextRouteId || undefined,
+        bus_stop: nextStopName || undefined,
+      });
 
-      // 2. Update Supabase
-      const { error: supError } = await supabase
-        .from('students')
-        .update({
-          transport_enabled: busEnabled,
-          bus_fee: busData.fee,
-          bus_route: busData.routeId,
-          bus_stop: busData.stopName,
-          updated_at: new Date().toISOString()
-        })
-        .eq('school_id', schoolId)
-        .eq('roll_number', student.rollNumber || student.id);
+      // 2. Persist the bus fee to fee_configs for this student's class
+      //    so it survives a page refresh
+      if (studentClassId) {
+        const existingConfig = feeConfigs.find(c => c.classId === studentClassId);
+        await saveFeeConfig(schoolId, {
+          classId: studentClassId,
+          totalFee: existingConfig?.totalFee ?? 0,
+          transportFee: draftBusFee,
+          optionalCharges: {
+            ...(existingConfig?.optionalCharges || {}),
+            transport: draftBusFee,
+          },
+        });
+      }
 
-      if (supError) console.error('Supabase sync for bus failed:', supError);
-
-      await fetchStudents(schoolId);
       toast.success('Transport settings updated successfully');
     } catch (err) {
       console.error('Transport Save Error:', err);
@@ -192,6 +194,8 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
       setSavingBus(false);
     }
   };
+
+
 
   const subjects = React.useMemo(() => {
     if (!student || !allSubjects) return ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English'];
@@ -260,11 +264,16 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
     );
   }
 
-  const marks = getStudentMarks(studentId, allMarks);
-  const overallPct = getOverallPercentage(studentId, allMarks);
+  // Students and parents only see published marks; admin/teacher see everything
+  const visibleMarks = (role === 'student' || role === 'parent')
+    ? allMarks.filter(m => m.isPublished)
+    : allMarks;
+
+  const marks = getStudentMarks(studentId, visibleMarks);
+  const overallPct = getOverallPercentage(studentId, visibleMarks);
   const attendancePct = getAttendancePercentage(studentId, attendance);
-  const ranking = getClassRanking(studentId, students, allMarks);
-  const summaries = generateAISummary(studentId, students, allMarks, attendance, subjects);
+  const ranking = getClassRanking(studentId, students, visibleMarks);
+  const summaries = generateAISummary(studentId, students, visibleMarks, attendance, subjects);
   const selectedReceiptTransaction = receiptTransactions.find(payment => payment.id === receiptPaymentId) || receiptTransactions[receiptTransactions.length - 1] || null;
   const receiptSummary = getFeeSummary(student as any, receiptMonth, ACADEMIC_YEAR);
 
@@ -375,7 +384,7 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
       <div className="bg-card rounded-xl border border-border p-5">
         <h3 className="font-display font-semibold text-foreground mb-4">Financial Overview</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <StatCard label="Monthly Fee (Total)" value={`₹${displayTotalFee}`} icon={IndianRupee} trend={student?.transport_enabled ? `Includes ₹${student?.bus?.fee || student?.bus?.fare || feeConfigs.find(c => normalizeClassString(c.classId) === normalizeClassString(student.classId))?.transportFee || 0} Bus` : ''} />
+          <StatCard label="Monthly Fee (Total)" value={`₹${displayTotalFee}`} icon={IndianRupee} trend={student?.transport_enabled ? `Includes ₹${busFee} Bus` : ''} />
           <StatCard label="Paid Amount" value={`₹${displayPaidAmount}`} icon={IndianRupee} variant="success" />
           <div className="relative group">
             <StatCard label="Pending Due" value={`₹${displayPending}`} icon={IndianRupee} variant={displayStatus === 'paid' ? 'success' : 'destructive'} />
@@ -427,30 +436,34 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
           <div className="flex flex-col md:flex-row gap-6 items-start md:items-center">
             <label className="flex items-center gap-3 cursor-pointer group">
               <div
-                onClick={() => setBusEnabled(!busEnabled)}
-                className={`w-12 h-6 rounded-full transition-all flex items-center p-1 ${busEnabled ? 'bg-primary' : 'bg-muted'}`}
+                onClick={() => {
+                  if (!simplified) setDraftBusEnabled(prev => !prev);
+                }}
+                className={`w-12 h-6 rounded-full transition-all flex items-center p-1 ${draftBusEnabled ? 'bg-primary' : 'bg-muted'}`}
               >
-                <div className={`w-4 h-4 rounded-full bg-white transition-all transform ${busEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
+                <div className={`w-4 h-4 rounded-full bg-white transition-all transform ${draftBusEnabled ? 'translate-x-6' : 'translate-x-0'}`} />
               </div>
               <span className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">Avails Bus Service</span>
             </label>
 
-            {busEnabled && (
+            {draftBusEnabled && (
               <div className="flex-1 animate-in fade-in slide-in-from-left-2 duration-200">
                 <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1 ml-1">Monthly Bus Fee (₹)</label>
                 <input
                   type="number"
-                  value={busFee}
-                  onChange={(e) => setBusFee(e.target.value)}
-                  className="w-full max-w-[200px] px-3 py-2 text-sm bg-muted/50 border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-bold"
+                  value={draftBusFee}
+                  onChange={(e) => setDraftBusFee(Number(e.target.value))}
+                  disabled={simplified}
+                  className="w-full max-w-[200px] px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all font-bold"
                   placeholder="e.g. 1500"
+                  min={0}
                 />
               </div>
             )}
 
             {!simplified && (
               <button
-                onClick={handleSaveBus}
+                onClick={() => handleSaveBus()}
                 disabled={savingBus}
                 className="md:ml-auto flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-50"
               >
@@ -460,18 +473,17 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
             )}
           </div>
 
-          {busEnabled && (
+          {draftBusEnabled && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-muted/20 rounded-2xl border border-border/50">
               <div className="space-y-4">
                 <div>
                   <label className="block text-[10px] font-black uppercase text-muted-foreground mb-1.5 ml-1">Select Route</label>
                   <select
-                    value={busRouteId}
+                    value={draftRouteId}
                     disabled={simplified}
                     onChange={(e) => {
-                      const rid = e.target.value;
-                      setBusRouteId(rid);
-                      setStopName('');
+                      setDraftRouteId(e.target.value);
+                      setDraftStopName(''); // reset stop when route changes
                     }}
                     className="w-full px-3 py-2.5 text-sm bg-card border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
                   >
@@ -483,25 +495,25 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
                 <div>
                   <label className="block text-[10px] font-black uppercase text-muted-foreground mb-1.5 ml-1">Select Stop</label>
                   <select
-                    value={stopName}
-                    disabled={simplified || !busRouteId}
-                    onChange={(e) => setStopName(e.target.value)}
+                    value={draftStopName}
+                    disabled={simplified || !draftRouteId}
+                    onChange={(e) => setDraftStopName(e.target.value)}
                     className="w-full px-3 py-2.5 text-sm bg-card border border-border rounded-xl text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
                   >
                     <option value="">Choose a stop...</option>
-                    {busRoutes.find(r => r.id === busRouteId)?.stops.sort((a, b) => a.order - b.order).map(s => <option key={s.name} value={s.name}>{s.name} ({s.time})</option>)}
+                    {busRoutes.find(r => r.id === draftRouteId)?.stops.sort((a, b) => a.order - b.order).map(s => <option key={s.name} value={s.name}>{s.name} ({s.time})</option>)}
                   </select>
                 </div>
               </div>
 
-              {busRouteId && stopName && (
+              {draftRouteId && draftStopName && (
                 <div className="bg-primary/5 rounded-2xl p-5 border border-primary/10">
                   <h4 className="text-[10px] font-black uppercase text-primary mb-3 flex items-center gap-1.5">
                     <Bus className="w-3 h-3" /> Scheduled Details
                   </h4>
                   {(() => {
-                    const r = busRoutes.find(x => x.id === busRouteId);
-                    const s = r?.stops.find(x => x.name === stopName);
+                    const r = busRoutes.find(x => x.id === draftRouteId);
+                    const s = r?.stops.find(x => x.name === draftStopName);
                     return (
                       <div className="space-y-3">
                         <div className="flex justify-between items-center text-sm border-b border-primary/5 pb-2">
@@ -654,13 +666,19 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
           <>
             <style dangerouslySetInnerHTML={{ __html: `
               @media print {
-                @page { 
-                   size: A4; 
-                   margin: 0; 
+                @page {
+                  size: A4 portrait;
+                  margin: 8mm 10mm;
                 }
-                body { 
-                   margin: 0 !important; 
-                   padding: 0 !important;
+                * {
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                  color-adjust: exact !important;
+                }
+                body {
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  background: white !important;
                 }
                 body > *:not(#receipt-overlay-root) {
                   display: none !important;
@@ -671,18 +689,31 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
                   height: auto !important;
                   margin: 0 !important;
                   padding: 0 !important;
+                  position: static !important;
+                }
+                #receipt-overlay {
+                  position: static !important;
+                  background: white !important;
+                  backdrop-filter: none !important;
+                  display: block !important;
+                  padding: 0 !important;
                 }
                 #receipt-content-to-print {
                   display: block !important;
-                  width: 210mm !important; /* A4 Width */
-                  min-height: 148mm !important; /* Half A4 is enough for receipt */
+                  width: 100% !important;
+                  max-width: 100% !important;
                   border: none !important;
                   box-shadow: none !important;
-                  margin: 0 auto !important;
-                  padding: 10mm !important;
+                  margin: 0 !important;
+                  border-radius: 0 !important;
+                  page-break-inside: avoid !important;
                   break-inside: avoid !important;
                 }
                 .no-print { display: none !important; }
+                .bg-slate-900 {
+                  background-color: #0f172a !important;
+                  -webkit-print-color-adjust: exact !important;
+                }
               }
             `}} />
             <div id="receipt-overlay-root">
@@ -697,169 +728,179 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
                   id="receipt-content-to-print"
                   initial={{ scale: 0.95, opacity: 0, y: 20 }}
                   animate={{ scale: 1, opacity: 1, y: 0 }}
-                  className="bg-white w-full max-w-[850px] border border-border rounded-3xl shadow-2xl overflow-hidden print:rounded-none print:max-w-none print:shadow-none"
+                  className="bg-white w-full max-w-[680px] border border-border rounded-3xl shadow-2xl overflow-hidden print:rounded-none print:max-w-none print:shadow-none"
                 >
-                  <div className="p-4 bg-muted/30 border-b border-border flex items-center justify-between print:hidden">
+                  {/* Toolbar — hidden on print */}
+                  <div className="p-3 bg-muted/30 border-b border-border flex items-center justify-between print:hidden no-print">
                     <div className="flex items-center gap-2">
-                       <FileText className="w-5 h-5 text-primary" />
-                       <h3 className="font-display font-bold text-foreground text-sm uppercase tracking-widest">Fee Receipt Preview</h3>
+                       <FileText className="w-4 h-4 text-primary" />
+                       <h3 className="font-display font-bold text-foreground text-xs uppercase tracking-widest">Fee Receipt Preview</h3>
                     </div>
                     <div className="flex items-center gap-2">
-                        <button 
+                        <button
                             onClick={() => window.print()}
-                            className="h-9 px-4 bg-primary text-white text-xs font-black uppercase rounded-xl hover:opacity-90 transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
+                            className="h-8 px-3 bg-primary text-white text-xs font-black uppercase rounded-xl hover:opacity-90 transition-all flex items-center gap-2 shadow-lg shadow-primary/20"
                         >
-                            <Printer className="w-4 h-4" /> Print Receipt
+                            <Printer className="w-3.5 h-3.5" /> Print Receipt
                         </button>
-                        <button onClick={() => setShowReceipt(false)} className="h-9 w-9 flex items-center justify-center hover:bg-muted rounded-xl transition-colors">
-                            <X className="w-5 h-5 text-muted-foreground" />
+                        <button onClick={() => setShowReceipt(false)} className="h-8 w-8 flex items-center justify-center hover:bg-muted rounded-xl transition-colors">
+                            <X className="w-4 h-4 text-muted-foreground" />
                         </button>
                     </div>
                   </div>
 
-                  <div className="p-12 print:p-8 font-sans text-slate-900 bg-white">
-                    <div className="flex justify-between items-start mb-10 pb-8 border-b-2 border-slate-100">
+                  {/* Receipt Body */}
+                  <div className="p-8 print:p-6 font-sans text-slate-900 bg-white">
+                    {/* Header */}
+                    <div className="flex justify-between items-start mb-6 pb-5 border-b-2 border-slate-100">
                       <div>
-                        <div className="flex items-center gap-2 mb-2">
-                            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center">
-                                <Sparkles className="w-6 h-6 text-white" />
+                        <div className="flex items-center gap-2 mb-1.5">
+                            <div className="w-9 h-9 bg-[#1a2744] rounded-xl flex items-center justify-center">
+                                <img src="/Favicon.png" alt="SchoolPulse" className="w-5 h-5 object-contain" onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }} />
                             </div>
-                            <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Schooler</h1>
+                            <h1 className="text-2xl font-black text-slate-900 tracking-tight">SchoolPulse</h1>
                         </div>
-                        <p className="text-[12px] font-black text-indigo-600 uppercase tracking-[0.4em] ml-1">Official Payment Voucher</p>
+                        <p className="text-[11px] font-black text-indigo-600 uppercase tracking-[0.3em] ml-1">Official Payment Voucher</p>
                       </div>
                       <div className="text-right">
-                        <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 inline-block">
-                            <p className="text-[10px] font-black text-slate-400 uppercase mb-0.5">Transaction ID</p>
-                            <p className="text-sm font-mono font-bold text-slate-800">{selectedReceiptTransaction?.id || 'TRX-PENDING'}</p>
-                            <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase italic">Generated via SchoolPulse ERP</p>
+                        <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 inline-block">
+                            <p className="text-[9px] font-black text-slate-400 uppercase mb-0.5">Transaction ID</p>
+                            <p className="text-xs font-mono font-bold text-slate-800">{selectedReceiptTransaction?.id || 'TRX-PENDING'}</p>
+                            <p className="text-[8px] font-bold text-slate-400 mt-0.5 uppercase italic">Generated via SchoolPulse ERP</p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-12 gap-10">
-                      <div className="col-span-12 md:col-span-7 space-y-8">
+                    <div className="grid grid-cols-12 gap-6">
+                      {/* Left Column */}
+                      <div className="col-span-12 md:col-span-7 space-y-5">
                         <div>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Recipient Details</p>
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Recipient Details</p>
                           <div className="space-y-1">
-                            <p className="text-3xl font-black text-slate-900 leading-tight">{student.name}</p>
-                            <div className="flex items-center gap-3">
-                                <span className="text-sm font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg uppercase">
+                            <p className="text-2xl font-black text-slate-900 leading-tight">{student.name}</p>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg uppercase">
                                     {getClassName(student.classId, storeClasses)} · {student.section}
                                 </span>
-                                <span className="text-sm font-black text-slate-400 uppercase tracking-widest">Roll: {student.rollNumber || student.id}</span>
+                                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Roll: {student.rollNumber || student.id}</span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-8 py-8 border-y-2 border-slate-50">
+                        <div className="grid grid-cols-2 gap-6 py-5 border-y-2 border-slate-50">
                           <div>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Billing Period</p>
-                            <p className="text-lg font-black text-slate-800">{receiptMonth} {ACADEMIC_YEAR.split('-')[0]}</p>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Billing Period</p>
+                            <p className="text-base font-black text-slate-800">{receiptMonth} {ACADEMIC_YEAR.split('-')[0]}</p>
                           </div>
                           <div>
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Payment Status</p>
-                            <div className="flex items-center gap-2">
-                                <div className={`w-2.5 h-2.5 rounded-full ${receiptSummary.status === 'paid' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]'}`} />
-                                <p className={`text-lg font-black uppercase tracking-tight ${receiptSummary.status === 'paid' ? 'text-green-600' : 'text-amber-600'}`}>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Payment Status</p>
+                            <div className="flex items-center gap-1.5">
+                                <div className={`w-2 h-2 rounded-full ${receiptSummary.status === 'paid' ? 'bg-green-500' : 'bg-amber-500'}`} />
+                                <p className={`text-base font-black uppercase tracking-tight ${receiptSummary.status === 'paid' ? 'text-green-600' : 'text-amber-600'}`}>
                                     {receiptSummary.status === 'paid' ? 'Fully Settled' : 'Partial Payment'}
                                 </p>
                             </div>
                           </div>
                         </div>
 
-                        <div className="pt-2">
-                          <p className="text-[11px] font-bold text-slate-500 italic max-w-sm">
+                        <div className="pt-1">
+                          <p className="text-[10px] font-bold text-slate-500 italic max-w-xs">
                             "Education is the most powerful weapon which you can use to change the world."
                           </p>
-                          <div className="mt-8 flex gap-4">
+                          <div className="mt-6 flex gap-4">
                              <div className="flex-1">
-                                <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mb-6">Parent Signature</p>
-                                <div className="border-b border-slate-200 w-32" />
+                                <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mb-5">Parent Signature</p>
+                                <div className="border-b border-slate-200 w-28" />
                              </div>
                              <div className="flex-1">
-                                <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mb-6">Accountant Seal</p>
-                                <div className="border-b border-slate-200 w-32" />
+                                <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mb-5">Accountant Seal</p>
+                                <div className="border-b border-slate-200 w-28" />
                              </div>
                           </div>
                         </div>
                       </div>
 
+                      {/* Right Column — Dark financial card */}
                       <div className="col-span-12 md:col-span-5">
-                        <div className="bg-slate-900 text-white rounded-[2rem] p-8 shadow-2xl relative overflow-hidden h-full flex flex-col justify-between">
-                          <div className="relative z-10 space-y-8">
+                        <div className="bg-slate-900 text-white rounded-[1.5rem] p-5 shadow-2xl relative overflow-hidden h-full flex flex-col justify-between">
+                          <div className="relative z-10 space-y-5">
                             <div>
-                                <h4 className="text-[11px] font-black uppercase text-indigo-400 tracking-[0.2em] mb-4">Financial Summary</h4>
-                                <div className="space-y-4">
+                                <h4 className="text-[10px] font-black uppercase text-indigo-400 tracking-[0.15em] mb-3">Financial Summary</h4>
+                                <div className="space-y-2.5">
                                     <div className="flex justify-between items-center opacity-60">
-                                        <span className="text-xs font-bold uppercase tracking-wider">Base Tuition</span>
-                                        <span className="text-sm font-black italic tracking-tight">₹{receiptSummary.baseFee.toLocaleString()}</span>
+                                        <span className="text-[11px] font-bold uppercase tracking-wider">Base Tuition</span>
+                                        <span className="text-xs font-black italic tracking-tight">₹{receiptSummary.baseFee.toLocaleString()}</span>
                                     </div>
                                     <div className="flex justify-between items-center opacity-60">
-                                        <span className="text-xs font-bold uppercase tracking-wider">Transport Fee</span>
-                                        <span className="text-sm font-black italic tracking-tight">₹{receiptSummary.busFee.toLocaleString()}</span>
+                                        <span className="text-[11px] font-bold uppercase tracking-wider">Transport Fee</span>
+                                        <span className="text-xs font-black italic tracking-tight">₹{receiptSummary.busFee.toLocaleString()}</span>
                                     </div>
-                                    <div className="h-px bg-white/10 my-4" />
+                                    <div className="h-px bg-white/10 my-2" />
                                     <div className="flex justify-between items-center">
-                                        <span className="text-xs font-black uppercase tracking-widest text-indigo-300">Total Monthly Fee</span>
-                                        <span className="text-xl font-black italic tracking-tighter text-indigo-100">₹{receiptSummary.totalFee.toLocaleString()}</span>
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-indigo-300">Total Monthly Fee</span>
+                                        <span className="text-lg font-black italic tracking-tighter text-indigo-100">₹{receiptSummary.totalFee.toLocaleString()}</span>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="pt-8">
-                                <div className="bg-white/10 rounded-2xl p-5 border border-white/5 backdrop-blur-sm">
-                                    <p className="text-[10px] font-black uppercase text-indigo-300 tracking-[0.2em] mb-1.5">Amount Paid Now</p>
+                            <div>
+                                <div className="bg-white/10 rounded-xl p-4 border border-white/5 backdrop-blur-sm">
+                                    <p className="text-[9px] font-black uppercase text-indigo-300 tracking-[0.15em] mb-1">Amount Paid Now</p>
                                     <div className="flex items-baseline gap-1">
-                                        <span className="text-sm font-bold text-white/60 italic tracking-tighter">₹</span>
-                                        <span className="text-4xl font-black tracking-tighter text-white drop-shadow-lg">{receiptSummary.paid.toLocaleString()}</span>
+                                        <span className="text-xs font-bold text-white/60 italic">₹</span>
+                                        <span className="text-3xl font-black tracking-tighter text-white">{receiptSummary.paid.toLocaleString()}</span>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="space-y-3">
-                                <p className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Transaction History</p>
-                                <div className="space-y-2">
+                            <div className="space-y-2">
+                                <p className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.15em]">Transaction History</p>
+                                <div className="space-y-1.5">
                                     {receiptTransactions.length > 0 ? receiptTransactions.map((payment, idx) => (
-                                      <div key={payment.id} className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-2 text-[11px] border border-white/5">
+                                      <div key={payment.id} className="flex items-center justify-between rounded-xl bg-white/5 px-3 py-1.5 text-[10px] border border-white/5">
                                         <div>
                                           <p className="font-black text-white italic">₹{Number(payment.amount || 0).toLocaleString()}</p>
-                                          <p className="text-[9px] font-bold text-white/40">
+                                          <p className="text-[8px] font-bold text-white/40">
                                             {formatPaymentTimestamp(payment.paidAt || payment.timestamp || payment.date)}
                                           </p>
                                         </div>
                                         <div className="text-right">
-                                            <span className="px-2 py-0.5 bg-white/10 rounded-full font-black text-[8px] uppercase">{payment.month} ({idx + 1})</span>
+                                            <span className="px-1.5 py-0.5 bg-white/10 rounded-full font-black text-[7px] uppercase">{payment.month} ({idx + 1})</span>
                                         </div>
                                       </div>
                                     )) : (
-                                      <p className="text-[10px] italic text-white/30 text-center py-4">No payments found.</p>
+                                      <p className="text-[9px] italic text-white/30 text-center py-3">No payments found.</p>
                                     )}
                                 </div>
                             </div>
                           </div>
-                          
-                          <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full -mr-24 -mt-24 pointer-events-none" />
-                          <div className="absolute bottom-0 left-0 w-32 h-32 bg-indigo-500/10 rounded-full -ml-16 -mb-16 pointer-events-none" />
+
+                          <div className="absolute top-0 right-0 w-36 h-36 bg-indigo-500/10 rounded-full -mr-18 -mt-18 pointer-events-none" />
+                          <div className="absolute bottom-0 left-0 w-24 h-24 bg-indigo-500/10 rounded-full -ml-12 -mb-12 pointer-events-none" />
                         </div>
                       </div>
                     </div>
 
-                    <div className="mt-12 pt-8 border-t border-slate-100 flex justify-between items-center">
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center border border-slate-100">
-                                <Sparkles className="w-6 h-6 text-slate-200" />
+                    {/* Footer */}
+                    <div className="mt-8 pt-5 border-t border-slate-100 flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 bg-[#1a2744] rounded-xl flex items-center justify-center">
+                                <img src="/Favicon.png" alt="SchoolPulse" className="w-5 h-5 object-contain" onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }} />
                             </div>
                             <div>
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Date of Issue</p>
-                                <p className="text-sm font-black text-slate-800 uppercase italic">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Date of Issue</p>
+                                <p className="text-xs font-black text-slate-800 uppercase italic">
                                     {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
                                 </p>
                             </div>
                         </div>
                         <div className="text-right">
-                            <p className="text-[9px] font-bold text-slate-300 mb-1 italic">Scan for authenticity</p>
-                            <div className="w-10 h-10 border border-slate-100 rounded bg-slate-50 mx-auto opacity-40 ml-auto" />
+                            <p className="text-[8px] font-bold text-slate-300 mb-1 italic">Scan for authenticity</p>
+                            <div className="w-8 h-8 border border-slate-100 rounded bg-slate-50 mx-auto opacity-40 ml-auto" />
                         </div>
                     </div>
                   </div>
@@ -868,6 +909,7 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
             </div>
           </>
           )}
+
         </AnimatePresence>,
         document.body
       )}
@@ -876,3 +918,4 @@ const StudentProfile = ({ student: initialStudent, onBack, simplified = false, o
 };
 
 export default StudentProfile;
+

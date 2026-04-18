@@ -1,17 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { ExamConfig, SubjectConfig, ClassConfig } from '@/lib/types';
 import { Check, Edit, Plus, Trash, BookOpen, Layers, Target, Eye, EyeOff, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { supabase } from "@/lib/supabase";
 
 const AcademicSettings = ({ schoolId }: { schoolId: string }) => {
     const { role } = useAuth();
     const { 
         exams, subjects, classes, 
         saveExamConfig, saveSubjectConfig, saveClassConfig, 
-        syncStudentsToSupabase,
         deleteExamConfig, deleteSubjectConfig, deleteClassConfig
     } = useStore();
 
@@ -141,7 +139,7 @@ const ClassesSettings = ({ schoolId, classes, saveClassConfig, deleteClassConfig
                                 </div>
                             </div>
                         </div>
-                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-2 transition-opacity">
                             <button onClick={() => handleEdit(c)} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Edit">
                                 <Edit className="w-4 h-4" />
                             </button>
@@ -267,7 +265,7 @@ const SubjectsSettings = ({ schoolId, subjects, classes, saveSubjectConfig, dele
                                 </div>
                             </div>
                         </div>
-                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-2 transition-opacity">
                             <button onClick={() => handleEdit(s)} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Edit">
                                 <Edit className="w-4 h-4" />
                             </button>

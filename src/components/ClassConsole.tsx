@@ -82,20 +82,6 @@ const ClassConsole = ({ onStudentClick }: { onStudentClick?: (student: Student) 
         saveAttendance,
     } = useStore();
 
-    useEffect(() => {
-        console.log("STORE STUDENTS:", students);
-        console.log("SELECTED CLASS:", selectedClass);
-        console.log("CLASSES:", storeClasses);
-    }, [students, selectedClass, storeClasses]);
-
-    useEffect(() => {
-        console.log("FINAL STUDENTS:", students);
-    }, [students]);
-
-    useEffect(() => {
-        console.log("Students:", students);
-    }, [students]);
-
     const uniqueClasses = storeClasses;
 
     const sortedExams = useMemo(() => [...exams].sort((a, b) => a.order - b.order), [exams]);
@@ -163,10 +149,6 @@ const ClassConsole = ({ onStudentClick }: { onStudentClick?: (student: Student) 
         if (!selectedClass) return students;
         return getStudentsByClassSection(students, selectedClass, selectedSection || undefined);
     }, [students, selectedClass, selectedSection]);
-
-    useEffect(() => {
-        console.log("STUDENTS LIVE:", students);
-    }, [students]);
 
     // ─── Row State ────────────────────────────────────────────────────────────────
     const [attRows, setAttRows] = useState<Record<string, AttRow>>({});

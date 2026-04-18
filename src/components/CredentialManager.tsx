@@ -1,18 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { initializeApp, getApp, getApps } from 'firebase/app';
-import { createUserWithEmailAndPassword, getAuth, sendPasswordResetEmail, signOut as firebaseSignOut } from 'firebase/auth';
-import { collection, doc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import { AlertCircle, Check, Key, Loader2, Plus, Save, Search, Send, Shield, Trash2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { auth, db, firebaseConfig } from '@/firebase';
 import { supabase } from '@/lib/supabase';
-import { sanitize } from '@/lib/data-utils';
 import { AppUser, LoginCredential, Student, UserRole, ClassConfig } from '@/lib/types';
 import { useStore } from '@/store/useStore';
-
-const BULK_CREDENTIALS_APP = 'schoolpulse-credentials-bulk';
 
 interface StagedCredentialRow {
   id: string;
@@ -85,13 +78,6 @@ const isUserRole = (value: string): value is UserRole =>
   value === 'teacher' ||
   value === 'student' ||
   value === 'parent';
-
-const getSecondaryAuth = () => {
-  const secondaryApp = getApps().some(app => app.name === BULK_CREDENTIALS_APP)
-    ? getApp(BULK_CREDENTIALS_APP)
-    : initializeApp(firebaseConfig, BULK_CREDENTIALS_APP);
-  return getAuth(secondaryApp);
-};
 
 const generateInitialPassword = () =>
   `Temp${Math.random().toString(36).slice(-8)}A1!`;
@@ -259,9 +245,8 @@ const createLoginCredential = (uid: string, row: StagedCredentialRow): LoginCred
 
 const CredentialManager = () => {
   const { schoolId } = useAuth();
-  const { students, classes, loginCredentials, loading: storeLoading, addLoginCredential, deleteLoginCredential } = useStore();
+  const { students, classes, loginCredentials, users: storeUsers, loading: storeLoading, addLoginCredential, updateLoginCredential, deleteLoginCredential } = useStore();
   const [users, setUsers] = useState<AppUser[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState('');
@@ -275,26 +260,8 @@ const CredentialManager = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      if (!db) return;
-      try {
-        setLoading(true);
-        const snapshot = await getDocs(collection(db, 'users'));
-        const fetchedUsers = snapshot.docs.map(userDoc => ({
-          uid: userDoc.id,
-          ...userDoc.data(),
-        })) as AppUser[];
-        setUsers(fetchedUsers);
-      } catch (err) {
-        console.error('Failed to fetch users:', err);
-        toast.error('Failed to load user list');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUsers();
-  }, []);
+    setUsers(storeUsers);
+  }, [storeUsers]);
 
   useEffect(() => {
     setStagedRows(prev => validateStagedRows(prev, students, classes, users));
@@ -355,7 +322,7 @@ const CredentialManager = () => {
     [users]
   );
 
-  if (loading || storeLoading.students || storeLoading.classes) {
+  if (storeLoading.students || storeLoading.classes) {
     return (
       <div className="flex justify-center py-10">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
@@ -376,8 +343,7 @@ const CredentialManager = () => {
   };
 
   const markEmailSent = async (uid: string) => {
-    await setDoc(doc(db, 'users', uid), { emailSent: true }, { merge: true });
-    await setDoc(doc(db, 'schools', schoolId, 'users', uid), { emailSent: true }, { merge: true });
+    await updateLoginCredential(schoolId, uid, { email_sent: true } as any);
     setUsers(prev => prev.map(user => user.uid === uid ? { ...user, emailSent: true } : user));
   };
 
@@ -528,7 +494,7 @@ const CredentialManager = () => {
   };
 
   const handleSaveBulkCredentials = async () => {
-    if (!schoolId || !db) return;
+    if (!schoolId) return;
 
     const rowsToSave = stagedRows.filter(row => !row.saved && row.errors.length === 0);
     if (!rowsToSave.length) {
@@ -537,7 +503,6 @@ const CredentialManager = () => {
     }
 
     setSavingBulk(true);
-    const secondaryAuth = getSecondaryAuth();
     const savedUsers: AppUser[] = [];
     let savedCount = 0;
     let failedCount = 0;
@@ -545,12 +510,20 @@ const CredentialManager = () => {
     try {
       for (const row of rowsToSave) {
         try {
-          const userCredential = await createUserWithEmailAndPassword(
-            secondaryAuth,
-            row.email,
-            generateInitialPassword(),
-          );
-          const uid = userCredential.user.uid;
+          const { data, error: signUpError } = await supabase.auth.signUp({
+            email: row.email,
+            password: generateInitialPassword(),
+            options: {
+              data: {
+                name: row.name,
+                role: row.role,
+                school_id: schoolId,
+              },
+            },
+          });
+          if (signUpError) throw signUpError;
+
+          const uid = data.user?.id || crypto.randomUUID();
           const userProfile = createUserProfile({
             uid,
             schoolId,
@@ -559,10 +532,7 @@ const CredentialManager = () => {
           });
           const loginCredential = createLoginCredential(uid, row);
 
-          await setDoc(doc(db, 'users', uid), sanitize(userProfile));
-          await setDoc(doc(db, 'schools', schoolId, 'users', uid), sanitize(userProfile));
           await addLoginCredential(schoolId, loginCredential);
-          await firebaseSignOut(secondaryAuth);
 
           savedUsers.push(userProfile);
           savedCount += 1;
@@ -591,7 +561,6 @@ const CredentialManager = () => {
       }
     } finally {
       setSavingBulk(false);
-      await firebaseSignOut(secondaryAuth).catch(() => undefined);
     }
 
     if (savedUsers.length) {
@@ -998,15 +967,25 @@ const AddCredentialForm = ({
     setSubmitting(true);
 
     try {
-      const secondaryAuth = getSecondaryAuth();
-      const userCredential = await createUserWithEmailAndPassword(
-        secondaryAuth,
-        normalizeEmail(form.email),
-        generateInitialPassword(),
-      );
-      const uid = userCredential.user.uid;
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: normalizeEmail(form.email),
+        password: generateInitialPassword(),
+        options: {
+          data: {
+            name: normalizeText(form.name),
+            role: form.role,
+            school_id: schoolId,
+          },
+        },
+      });
+      if (signUpError) throw signUpError;
 
-      await sendPasswordResetEmail(auth, normalizeEmail(form.email));
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizeEmail(form.email), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (resetError) throw resetError;
+
+      const uid = data.user?.id || crypto.randomUUID();
 
       const linkedStudent = students.find(student => student.id === form.linkedStudentId);
       const stagedRow: StagedCredentialRow = {
@@ -1041,19 +1020,6 @@ const AddCredentialForm = ({
         row: stagedRow,
         emailSent: true,
       });
-
-      if (form.role === 'student' || form.role === 'parent') {
-        const student = students.find(s => s.id === form.linkedStudentId);
-        if (student) {
-          await updateDoc(doc(db, 'schools', schoolId, 'students', student.id), {
-            uid,
-          });
-        }
-      }
-
-      await setDoc(doc(db, 'users', uid), sanitize(userProfile));
-      await setDoc(doc(db, 'schools', schoolId, 'users', uid), sanitize(userProfile));
-      await firebaseSignOut(secondaryAuth);
 
       onCreated(userProfile);
       toast.success(`Credential created. Reset link sent to ${form.email}`);

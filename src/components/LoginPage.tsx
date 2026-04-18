@@ -2,10 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppUser, UserRole } from '@/lib/types';
-import { auth, db } from '@/firebase';
 import { supabase } from '@/lib/supabase';
-import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
 import { Shield, BookOpen, Users, GraduationCap, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getRoleHomePath } from '@/components/ProtectedRoute';
@@ -20,35 +17,33 @@ const LoginPage = () => {
   const [isLoading, setIsLoading] = useState(false);
 
   const resolveUserProfile = async (uid: string): Promise<AppUser | null> => {
-    // 1. Try Supabase first
-    const { data: sbUser, error: sbError } = await supabase
-      .from('users')
+    const { data, error } = await supabase
+      .from('user_profiles')
       .select('*')
-      .eq('uid', uid)
+      .eq('id', uid)
       .maybeSingle();
 
-    if (!sbError && sbUser) {
-      return {
-        ...sbUser,
-        uid: sbUser.uid || uid,
-        schoolId: sbUser.schoolId || 'school_001',
-      } as AppUser;
+    if (error) {
+      console.error('Supabase profile lookup failed:', error);
+      return null;
     }
 
-    // 2. Fallback to Firestore (original store)
-    try {
-      const userRef = doc(db, 'users', uid);
-      const userSnap = await getDoc(userRef);
-
-      if (userSnap.exists()) {
-        const userData = userSnap.data() as AppUser;
-        return {
-          ...userData,
-          uid: userData.uid || uid,
-          schoolId: userData.schoolId || 'school_001',
-        };
-      }
-    } catch (err) { }
+    if (data) {
+      return {
+        uid,
+        email: data.email || '',
+        role: data.role,
+        name: data.name || data.email || 'User',
+        emailSent: Boolean(data.email_sent ?? data.emailSent),
+        classId: data.class_id || undefined,
+        section: data.section || undefined,
+        rollNumber: data.roll_number || undefined,
+        linkedStudentId: data.linked_student_id || undefined,
+        linkedChildrenIds: data.linked_children_ids || undefined,
+        schoolId: data.school_id || 'school_001',
+        createdAt: data.created_at || new Date().toISOString(),
+      } as AppUser;
+    }
 
     return null;
   };
@@ -72,9 +67,10 @@ const LoginPage = () => {
     setPendingLoginRole(selectedRole);
 
     try {
-      // PRIMARY: Login via Firebase so existing credentials work
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const userData = await resolveUserProfile(userCredential.user.uid);
+      const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+      if (loginError) throw loginError;
+
+      const userData = data.user ? await resolveUserProfile(data.user.id) : null;
 
       if (!userData) {
         setPendingLoginRole(null);
@@ -100,28 +96,8 @@ const LoginPage = () => {
 
       navigate(getRoleHomePath(userData.role), { replace: true });
     } catch (error: any) {
-      console.error("Firebase Login Error:", error.code, error.message);
-      
-      // OPTIONAL: Fallback to Supabase
-      try {
-        const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({ email, password });
-        if (!sbError && sbData.user) {
-            const userData = await resolveUserProfile(sbData.user.id);
-            if (userData && selectedRole === userData.role) {
-                navigate(getRoleHomePath(userData.role), { replace: true });
-                return;
-            } else if (userData) {
-                const roleLabel = roles.find(r => r.role === userData.role)?.label || userData.role;
-                setError(`Access denied: This account is registered as ${roleLabel}.`);
-                await signOut();
-                setIsLoading(false);
-                return;
-            }
-        }
-      } catch(e) {}
-
+      console.error("Supabase login error:", error.message || error);
       setPendingLoginRole(null);
-      // Consistent error message for any credential failure
       setError("Invalid email or password. Please check your credentials.");
     } finally {
       setIsLoading(false);
@@ -139,7 +115,10 @@ const LoginPage = () => {
     }
 
     try {
-      await sendPasswordResetEmail(auth, email);
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
       toast.success("Password reset email sent. Check your inbox.");
     } catch (err: any) {
       console.error(err);

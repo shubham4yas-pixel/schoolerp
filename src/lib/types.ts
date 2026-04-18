@@ -83,6 +83,7 @@ export interface Student {
   paidAmount: number;   // REQUIRED
   parentName: string;
   parentContact: string;
+  motherName?: string;
   enrollmentDate: string;
   avatarColor: string;
   photoURL?: string;
@@ -222,6 +223,7 @@ export interface AppUser {
   linkedChildrenIds?: string[];
   schoolId: string;
   createdAt: string;
+  photoURL?: string;
 }
 
 export interface FeeConfig {

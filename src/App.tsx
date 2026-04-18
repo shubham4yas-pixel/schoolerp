@@ -15,6 +15,7 @@ import TeacherDashboard from "@/pages/TeacherDashboard";
 import StudentDashboard from "@/pages/StudentDashboard";
 import ParentDashboard from "@/pages/ParentDashboard";
 import Login from "@/pages/Login";
+import ResetPassword from "@/pages/ResetPassword";
 import { Loader2 } from "lucide-react";
 
 const queryClient = new QueryClient();
@@ -42,18 +43,15 @@ const AuthGate = () => {
 
 const AppBootstrap = () => {
   const { schoolId, role, authLoading } = useAuth();
-  const initListeners = useStore(state => state.initListeners);
-  const fetchStudents = useStore(state => state.fetchStudents || (async () => {}));
+  const init = useStore(state => state.init);
 
   useEffect(() => {
     if (authLoading || !role || !schoolId) {
       return;
     }
-
-    fetchStudents(schoolId);
-    const unsubscribe = initListeners(schoolId);
-    return () => unsubscribe();
-  }, [authLoading, role, schoolId, initListeners, fetchStudents]);
+    // Initialize all data from Supabase on login
+    void init(schoolId);
+  }, [authLoading, role, schoolId, init]);
 
   return null;
 };
@@ -77,6 +75,7 @@ const App = () => {
                 <Route path="/student" element={<ProtectedRoute role="student"><StudentDashboard /></ProtectedRoute>} />
                 <Route path="/parent" element={<ProtectedRoute role="parent"><ParentDashboard /></ProtectedRoute>} />
                 <Route path="/students" element={<Navigate to="/student" replace />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>

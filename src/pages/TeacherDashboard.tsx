@@ -10,6 +10,7 @@ import BusManagement from '@/components/BusManagement';
 import StudentSearch from '@/components/StudentSearch';
 import FileUpload from '@/components/FileUpload';
 import StudentAvatar from '@/components/StudentAvatar';
+import ProfilePhotoWidget from '@/components/ProfilePhotoWidget';
 import { useAuth } from '@/contexts/AuthContext';
 import { useStore } from '@/store/useStore';
 import {
@@ -269,7 +270,7 @@ const TeacherUploadTab = () => (
 );
 
 const TeacherDashboard = () => {
-  const { role: userRole, classId: authClassId } = useAuth();
+  const { role: userRole, classId: authClassId, user } = useAuth();
   const {
     students,
     marks,
@@ -369,6 +370,22 @@ const TeacherDashboard = () => {
 
   return (
     <AppLayout title={dashboardTitle}>
+      {/* Teacher profile header */}
+      <div className="flex items-center gap-4 mb-6 p-4 bg-card border border-border rounded-2xl">
+        <ProfilePhotoWidget
+          name={user?.name || 'Teacher'}
+          photoURL={user?.photoURL || ''}
+          size="w-14 h-14"
+          editable
+        />
+        <div className="flex-1 min-w-0">
+          <p className="font-display font-bold text-foreground truncate">{user?.name || 'Teacher'}</p>
+          <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+            {teacherClassName ? `Class ${teacherClassName}` : 'Teacher'} &bull; {classStudents.length} students
+          </p>
+        </div>
+      </div>
+
       <div className="flex flex-wrap gap-2 mb-6">
         {teacherTabs.map(tab => (
           <button

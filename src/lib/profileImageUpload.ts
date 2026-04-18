@@ -1,27 +1,34 @@
-import { doc, setDoc } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
-import { db, storage } from "@/firebase";
-import { sanitize } from "@/lib/data-utils";
+import { supabase } from "@/lib/supabase";
 
 const mapUploadError = (error: unknown) => {
-  const code = typeof error === "object" && error && "code" in error
-    ? String((error as { code?: string }).code)
-    : "";
-
-  switch (code) {
-    case "storage/unknown":
-    case "storage/retry-limit-exceeded":
-    case "storage/unauthorized":
-    case "storage/canceled":
-      return "Upload failed. Please retry.";
-    default:
-      if (error instanceof Error && error.message) {
-        return error.message;
-      }
-      return "Upload failed. Please retry.";
+  if (error instanceof Error && error.message) {
+    return error.message;
   }
+  return "Upload failed. Please retry.";
 };
 
+const readFileAsDataUrl = (file: File, onProgress?: (progress: number) => void) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress?.(Math.round((event.loaded / event.total) * 70));
+      }
+    };
+
+    reader.onerror = () => reject(reader.error || new Error("Could not read image file"));
+    reader.onload = () => {
+      onProgress?.(85);
+      resolve(String(reader.result || ""));
+    };
+    reader.readAsDataURL(file);
+  });
+
+/**
+ * Upload a profile picture for a student.
+ * Saves the photo_url to the students table by roll_number/id.
+ */
 export async function uploadProfileImage(
   file: File,
   studentId: string,
@@ -38,60 +45,71 @@ export async function uploadProfileImage(
     throw new Error("Missing student id");
   }
 
+  if (!schoolId) {
+    console.error("Missing schoolId for profile upload");
+    throw new Error("Missing school id");
+  }
+
   if (!file.type.startsWith("image/")) {
     throw new Error("Please select an image file");
   }
 
-  console.log("FILE:", file);
-  console.log("SIZE:", file.size);
-  console.log("TYPE:", file.type);
+  try {
+    onProgress?.(10);
+    const imageDataUrl = await readFileAsDataUrl(file, onProgress);
 
-  const storageRef = ref(storage, `profilePictures/${studentId}.jpg`);
-  console.log("STORAGE PATH:", storageRef.fullPath);
-  console.log(
-    "EXPECTED STORAGE ENDPOINT:",
-    `https://firebasestorage.googleapis.com/v0/b/${storage.app.options.storageBucket}/o`,
-  );
+    const { error } = await supabase
+      .from("students")
+      .update({
+        profile_image: imageDataUrl,
+        photo_url: imageDataUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("school_id", schoolId)
+      .eq("roll_number", studentId);
 
-  const uploadTask = uploadBytesResumable(storageRef, file);
+    if (error) throw error;
 
-  return new Promise<string>((resolve, reject) => {
-    uploadTask.on(
-      "state_changed",
-      (snapshot) => {
-        const progress = snapshot.totalBytes > 0
-          ? (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-          : 0;
+    onProgress?.(100);
+    return imageDataUrl;
+  } catch (error) {
+    console.error("PROFILE IMAGE SAVE ERROR:", error);
+    throw new Error(mapUploadError(error));
+  }
+}
 
-        console.log("STATE:", snapshot.state);
-        console.log("Progress:", progress);
-        onProgress?.(progress);
-      },
-      (error) => {
-        console.error("ERROR CODE:", error.code);
-        console.error("ERROR MSG:", error.message);
-        reject(new Error(mapUploadError(error)));
-      },
-      async () => {
-        try {
-          const url = await getDownloadURL(uploadTask.snapshot.ref);
-          console.log("SUCCESS URL:", url);
+/**
+ * Upload a profile picture for a non-student user (teacher, parent, accountant, admin).
+ * Saves the photo_url to the user_profiles table by uid.
+ */
+export async function uploadUserProfileImage(
+  file: File,
+  uid: string,
+  onProgress?: (progress: number) => void,
+): Promise<string> {
+  if (!file || file.size === 0) throw new Error("Invalid file");
+  if (!uid) throw new Error("Missing user id");
+  if (!file.type.startsWith("image/")) throw new Error("Please select an image file");
 
-          await setDoc(
-            doc(db, "schools", schoolId, "students", studentId),
-            sanitize({
-              profileImage: url,
-              photoURL: url,
-            }),
-            { merge: true },
-          );
+  try {
+    onProgress?.(10);
+    const imageDataUrl = await readFileAsDataUrl(file, onProgress);
+    onProgress?.(90);
 
-          resolve(url);
-        } catch (error) {
-          console.error("PROFILE IMAGE SAVE ERROR:", error);
-          reject(new Error(mapUploadError(error)));
-        }
-      },
-    );
-  });
+    const { error } = await supabase
+      .from("user_profiles")
+      .update({
+        photo_url: imageDataUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", uid);
+
+    if (error) throw error;
+
+    onProgress?.(100);
+    return imageDataUrl;
+  } catch (error) {
+    console.error("USER PROFILE IMAGE SAVE ERROR:", error);
+    throw new Error(mapUploadError(error));
+  }
 }

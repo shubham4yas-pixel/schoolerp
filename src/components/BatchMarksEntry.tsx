@@ -195,8 +195,11 @@ const BatchMarksEntry = ({ onStudentClick, hideFilters = false }: BatchMarksEntr
                 await updateStudentResult(schoolId!, studentId, context.examId, context.subjectId, marksVal, 'bulk_entry');
                 setSavingStatus(prev => ({ ...prev, [key]: 'saved' }));
                 setTimeout(() => setSavingStatus(prev => ({ ...prev, [key]: 'idle' })), 2000);
-            } catch (err) {
+            } catch (err: any) {
                 setSavingStatus(prev => ({ ...prev, [key]: 'error' }));
+                const msg = err?.message || 'Failed to save marks';
+                console.error('AutoSave error:', err);
+                toast.error(`Save failed: ${msg}`, { duration: 5000 });
             }
         }, 1000);
     };

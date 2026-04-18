@@ -2,14 +2,9 @@ import { useState, useRef, useMemo, useEffect } from 'react';
 import { Upload, FileSpreadsheet, AlertCircle, CheckCircle2, X } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { useAuth } from '@/contexts/AuthContext';
-import { calculateFeeStatus } from '@/lib/data-utils';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
-import { db } from '@/firebase';
-import { doc, setDoc, collection, arrayUnion, addDoc } from 'firebase/firestore';
-import { supabase } from '@/lib/supabase';
-import { sanitize } from '@/lib/data-utils';
 import { hasSubAccess } from '@/lib/rbac-utils';
 
 type UploadType = 'marks' | 'attendance' | 'fees' | 'students';
@@ -168,7 +163,7 @@ const FileUpload = ({ initialType }: FileUploadProps) => {
   };
 
   const handleSaveAll = async () => {
-    if (!preview || preview.length === 0 || !schoolId || !db) return;
+    if (!preview || preview.length === 0 || !schoolId) return;
     setImporting(true);
     let success = 0;
     let errors = 0;
@@ -179,32 +174,37 @@ const FileUpload = ({ initialType }: FileUploadProps) => {
     try {
       for (const record of dataRows) {
         if (selectedType === 'students') {
-            // STEP 2 — WRITE TO FIRESTORE (Mandated Schema)
-            const studentsRef = collection(db, "schools", "school_001", "students");
-            
             for (const row of dataRows) {
               const rawClassValue = (row.Class || row.class || contextClass || "").toString().trim();
               const matchedClass = storeClasses.find(c => c.classId === rawClassValue || c.name === rawClassValue);
               const classId = matchedClass?.classId || contextClass || "";
               const className = matchedClass?.name || rawClassValue;
+              const rollNumber = (row['Roll No'] || row['Student ID'] || row.studentId || row.rollNumber || row.RollNo || crypto.randomUUID()).toString().trim();
 
-              const { error } = await supabase
-                .from('students')
-                .insert([
-                  {
-                    school_id: schoolId,
-                    name: row.Name || row.name || "",
-                    class_id: classId,
-                    class: className,
-                    section: (row.Section || row.section || contextSection || "A").toString().toUpperCase(),
-                    roll_number: (row['Roll No'] || row.rollNumber || row.RollNo || "").toString().trim(),
-                    total_fees: Number(row.Fees || row.fees || row.totalFees || 0),
-                    paid_amount: Number(row.Paid || row.paid || row.paidAmount || 0),
-                    created_at: new Date().toISOString(),
-                  }
-                ]);
-
-              if (error) {
+              try {
+                await useStore.getState().addStudent(schoolId, {
+                  id: rollNumber,
+                  rollNumber,
+                  name: row.Name || row.name || "",
+                  classId: classId || className,
+                  class: className || classId,
+                  className: className || classId,
+                  section: (row.Section || row.section || contextSection || "A").toString().toUpperCase(),
+                  schoolId,
+                  totalFees: Number(row.Fees || row.fees || row.totalFees || 0),
+                  paidAmount: Number(row.Paid || row.paid || row.paidAmount || 0),
+                  parentName: row['Parent Name'] || row.parentName || "",
+                  parentContact: row.Contact || row.parentContact || "",
+                  enrollmentDate: new Date().toISOString(),
+                  avatarColor: '',
+                  transport_enabled: String(row['Bus Service'] || row.transport || '').toLowerCase().startsWith('y'),
+                  bus: {
+                    opted: String(row['Bus Service'] || row.transport || '').toLowerCase().startsWith('y'),
+                    routeId: '',
+                    stopName: '',
+                  },
+                } as any);
+              } catch (error) {
                 console.error("Insert failed:", error);
                 errors++;
                 continue;
@@ -358,7 +358,7 @@ const FileUpload = ({ initialType }: FileUploadProps) => {
           <p className="font-bold mb-1">Multi-School Architecture Constraints:</p>
           <p className="opacity-90">{expectedColumns}</p>
           <p className="text-xs text-muted-foreground mt-2 font-medium bg-background px-3 py-1 rounded-md border border-border inline-block">
-            Smart Sync: Student records merge securely into Firestore using ID: [Class]-[Section]-[Roll].
+            Smart Sync: Student records merge securely into Supabase using ID: [Class]-[Section]-[Roll].
           </p>
         </div>
       </div>
@@ -433,7 +433,7 @@ const FileUpload = ({ initialType }: FileUploadProps) => {
               </table>
               {preview.length > 5 && (
                 <div className="px-5 py-3 text-xs font-bold text-primary bg-primary/5 border-t border-border/50 text-center">
-                  ... and {preview.length - 5} more rows ready for Firestore sync.
+                  ... and {preview.length - 5} more rows ready for Supabase sync.
                 </div>
               )}
             </div>
@@ -442,7 +442,7 @@ const FileUpload = ({ initialType }: FileUploadProps) => {
               {importing ? (
                 <div className="flex-1 max-w-sm w-full">
                   <div className="flex justify-between text-xs font-bold text-primary mb-1.5">
-                    <span>Writing securely to Firestore...</span>
+                    <span>Writing securely to Supabase...</span>
                     <span>{progress}%</span>
                   </div>
                   <div className="h-2 bg-muted rounded-full overflow-hidden">

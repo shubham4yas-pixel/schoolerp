@@ -9,16 +9,13 @@ import StudentDashboard from '@/pages/StudentDashboard';
 
 const Index = () => {
   const { user, role, schoolId, authLoading } = useAuth();
-  const initListeners = useStore(state => state.setGlobalFilterSearch ? state.initListeners : (id: string) => () => { }); // Safety check
-  const fetchStudents = useStore(state => state.fetchStudents || (async () => {}));
+  const init = useStore(state => state.init);
 
   useEffect(() => {
     if (schoolId) {
-      fetchStudents(schoolId);
-      const unsubscribe = initListeners(schoolId);
-      return () => unsubscribe();
+      // void init(schoolId);
     }
-  }, [schoolId, initListeners, fetchStudents]);
+  }, [schoolId, init]);
 
   if (authLoading) {
     return (
