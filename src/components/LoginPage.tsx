@@ -76,19 +76,19 @@ const FAQAccordion = ({ faqs }: { faqs: FAQItem[] }) => {
             <span className="font-semibold text-sm text-foreground" itemProp="name">{item.q}</span>
             {open === i ? <ChevronUp className="w-4 h-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
           </button>
-          {open === i && (
-            <div
-              id={`faq-a-${i}`}
-              role="region"
-              aria-labelledby={`faq-q-${i}`}
-              className="px-5 pb-4 text-sm text-muted-foreground bg-card"
-              itemScope
-              itemProp="acceptedAnswer"
-              itemType="https://schema.org/Answer"
-            >
-              <p itemProp="text">{item.a}</p>
-            </div>
-          )}
+          {/* Always in DOM so Google bot can read acceptedAnswer - visibility via CSS only */}
+          <div
+            id={`faq-a-${i}`}
+            role="region"
+            aria-labelledby={`faq-q-${i}`}
+            className="px-5 text-sm text-muted-foreground bg-card transition-all duration-300 overflow-hidden"
+            style={{ maxHeight: open === i ? '200px' : '0px', paddingBottom: open === i ? '1rem' : '0px' }}
+            itemScope
+            itemProp="acceptedAnswer"
+            itemType="https://schema.org/Answer"
+          >
+            <p itemProp="text">{item.a}</p>
+          </div>
         </div>
       ))}
     </div>
