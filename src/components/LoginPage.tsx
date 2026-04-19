@@ -152,6 +152,9 @@ const LoginPage = () => {
     clearAuthError();
     setPendingLoginRole(selectedRole);
 
+    // Safety timeout — never leave button permanently stuck
+    const safetyTimer = setTimeout(() => setIsLoading(false), 10000);
+
     try {
       const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
       if (loginError) throw loginError;
@@ -161,6 +164,7 @@ const LoginPage = () => {
       if (!userData) {
         setPendingLoginRole(null);
         setError('Account verified, but profile not found. Please contact admin.');
+        setIsLoading(false);
         await signOut();
         return;
       }
@@ -169,6 +173,7 @@ const LoginPage = () => {
         const roleLabel = roles.find(r => r.role === userData.role)?.label || userData.role;
         setPendingLoginRole(null);
         setError(`Access denied: This account is registered as ${roleLabel}.`);
+        setIsLoading(false);
         await signOut();
         return;
       }
@@ -176,6 +181,7 @@ const LoginPage = () => {
       if (userData.role === 'student' && !userData.linkedStudentId && !(userData.linkedChildrenIds || []).length) {
         setPendingLoginRole(null);
         setError('No student record linked to this account.');
+        setIsLoading(false);
         await signOut();
         return;
       }
@@ -186,6 +192,7 @@ const LoginPage = () => {
       setPendingLoginRole(null);
       setError('Invalid email or password. Please check your credentials.');
     } finally {
+      clearTimeout(safetyTimer);
       setIsLoading(false);
     }
   };
