@@ -194,7 +194,7 @@ const LoginPage = () => {
     if (!email.includes('@')) { toast.error('Enter a valid email address'); return; }
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: 'https://www.theschoolpulse.in/reset-password',
       });
       if (error) throw error;
       toast.success('Password reset email sent. Check your inbox.');

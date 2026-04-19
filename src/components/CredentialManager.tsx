@@ -350,7 +350,7 @@ const CredentialManager = () => {
   const handleSendResetEmail = async (user: AppUser) => {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: 'https://www.theschoolpulse.in/reset-password',
       });
       if (error) throw error;
       await markEmailSent(user.uid);
@@ -374,7 +374,7 @@ const CredentialManager = () => {
     for (const user of pendingEmailUsers) {
       try {
         const { error } = await supabase.auth.resetPasswordForEmail(user.email, {
-          redirectTo: `${window.location.origin}/reset-password`,
+          redirectTo: 'https://www.theschoolpulse.in/reset-password',
         });
         if (error) throw error;
         await markEmailSent(user.uid);
@@ -981,7 +981,7 @@ const AddCredentialForm = ({
       if (signUpError) throw signUpError;
 
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizeEmail(form.email), {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: 'https://www.theschoolpulse.in/reset-password',
       });
       if (resetError) throw resetError;
 
