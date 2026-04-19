@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase';
 import {
   Shield, BookOpen, Users, GraduationCap, AlertCircle, Loader2,
   CheckCircle2, BarChart3, ClipboardList, DollarSign, Bell, Lock,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Eye, EyeOff
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getRoleHomePath } from '@/components/ProtectedRoute';
@@ -98,6 +98,7 @@ const LoginPage = () => {
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -326,15 +327,26 @@ const LoginPage = () => {
                     <label htmlFor="login-password" className="block text-[10px] font-black uppercase tracking-widest text-foreground/60">Password</label>
                     <button type="button" onClick={handleForgotPassword} className="text-[10px] font-bold text-primary hover:underline uppercase tracking-wide" id="forgot-password-btn">Forgot Password?</button>
                   </div>
-                  <input
-                    id="login-password"
-                    type="password"
-                    value={password}
-                    onChange={e => { setPassword(e.target.value); if (error) setError(''); if (authError) clearAuthError(); }}
-                    className="w-full px-4 py-3 text-sm bg-muted/50 border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all"
-                    placeholder="Enter your password"
-                    autoComplete="current-password"
-                  />
+                  <div className="relative">
+                    <input
+                      id="login-password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={e => { setPassword(e.target.value); if (error) setError(''); if (authError) clearAuthError(); }}
+                      className="w-full px-4 py-3 pr-11 text-sm bg-muted/50 border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all"
+                      placeholder="Enter your password"
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(p => !p)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                      tabIndex={-1}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
                 {displayError && (
                   <div role="alert" className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-lg border border-destructive/20 animate-in fade-in slide-in-from-top-1">
