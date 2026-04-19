@@ -188,8 +188,15 @@ const RouteCard = ({ route, isAdmin, isEditing, onEdit, schoolId, updateBusRoute
 const AddRouteForm = ({ schoolId, addBusRoute, onClose }: { schoolId: string; addBusRoute: any; onClose: () => void }) => {
   const [form, setForm] = useState({
     routeName: '', routeNumber: '', driverName: '', driverContact: '',
-    vehicleNumber: '', capacity: '40', stops: '',
+    vehicleNumber: '', capacity: '40', stops: '', stopTimes: '',
   });
+
+  // Build structured stops: pair stop names with their times
+  const buildStops = () => {
+    const names = form.stops.split(',').map(s => s.trim()).filter(Boolean);
+    const times = form.stopTimes.split(',').map(t => t.trim());
+    return names.map((name, i) => ({ name, time: times[i] || '', order: i + 1 }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,7 +206,7 @@ const AddRouteForm = ({ schoolId, addBusRoute, onClose }: { schoolId: string; ad
       driverName: form.driverName, driverContact: form.driverContact,
       vehicleNumber: form.vehicleNumber, capacity: parseInt(form.capacity) || 40,
       assignedStudents: [],
-      stops: form.stops.split(',').map((s, i) => ({ name: s.trim(), time: `07:${String(i * 15).padStart(2, '0')}`, order: i + 1 })).filter(s => s.name),
+      stops: buildStops(),
       status: 'Active',
     };
     await addBusRoute(schoolId, newRoute);
@@ -222,6 +229,10 @@ const AddRouteForm = ({ schoolId, addBusRoute, onClose }: { schoolId: string; ad
         <FormInput label="Capacity" type="number" value={form.capacity} onChange={v => setForm({ ...form, capacity: v })} />
         <div className="md:col-span-2">
           <FormInput label="Stops (comma-separated)" value={form.stops} onChange={v => setForm({ ...form, stops: v })} placeholder="Stop 1, Stop 2, School Gate" />
+        </div>
+        <div className="md:col-span-2">
+          <FormInput label="Stop Times (comma-separated, same order as stops)" value={form.stopTimes} onChange={v => setForm({ ...form, stopTimes: v })} placeholder="07:00, 07:20, 07:45" />
+          <p className="text-xs text-muted-foreground mt-1">Enter one time per stop in the same order. Leave blank if not known.</p>
         </div>
         <div className="md:col-span-2">
           <button type="submit" className="flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90">

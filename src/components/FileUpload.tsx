@@ -74,62 +74,95 @@ const FileUpload = ({ initialType }: FileUploadProps) => {
   }, [selectedType, templateMode]);
 
   const downloadTemplate = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const selectedClassName = storeClasses.find(c => c.classId === contextClass)?.name || contextClass || 'Class 10';
+    const firstExam = exams[0]?.name || 'Midterm';
+    const firstSubject = storeSubjects[0]?.name || 'Mathematics';
+
+    // Get pre-fill students based on mode
+    const prefillStudents = (() => {
+      if (templateMode === 'section' && contextClass && contextSection) {
+        return students.filter(s => s.classId === contextClass && s.section?.toUpperCase() === contextSection.toUpperCase());
+      }
+      if (templateMode === 'class' && contextClass) {
+        return students.filter(s => s.classId === contextClass);
+      }
+      return [];
+    })();
+
     let headers: string[] = [];
-    let example: any[] = [];
+    let rows: any[][] = [];
 
-    // Base Columns based on Mode
-    if (templateMode === 'universal') headers.push('Class', 'Section');
-    else if (templateMode === 'class') headers.push('Section');
-
-    // Type Specific Columns
     if (selectedType === 'marks') {
-      headers.push('Exam Type', 'Subject', 'Student ID', 'Marks', 'Out Of', 'Date');
-      const baseRow = [exams[0]?.name || 'Midterm', storeSubjects[0]?.name || 'Mathematics', 'ID_123', '85', '100', new Date().toISOString().split('T')[0]];
-      if (templateMode === 'universal') example = ['Class 10', 'A', ...baseRow];
-      else if (templateMode === 'class') example = ['A', ...baseRow];
-      else example = baseRow;
+      if (templateMode === 'universal') headers.push('Class', 'Section');
+      else if (templateMode === 'class') headers.push('Section');
+      headers.push('Student Name', 'Student ID', 'Exam Type', 'Subject', 'Marks', 'Out Of', 'Date');
+      if (prefillStudents.length > 0) {
+        rows = prefillStudents.map(s => {
+          const base = [s.name, s.rollNumber || s.id, firstExam, firstSubject, '', '100', today];
+          if (templateMode === 'class') return [s.section || '', ...base];
+          if (templateMode === 'universal') return [selectedClassName, s.section || '', ...base];
+          return base;
+        });
+      } else {
+        const base = ['John Doe', 'ID_123', firstExam, firstSubject, '85', '100', today];
+        if (templateMode === 'universal') rows = [['Class 10', 'A', ...base]];
+        else if (templateMode === 'class') rows = [['A', ...base]];
+        else rows = [base];
+      }
     } else if (selectedType === 'attendance') {
-      headers.push('Student ID', 'Date', 'Status (Present/Absent/Leave)', 'Reason');
-      const baseRow = ['ID_123', new Date().toISOString().split('T')[0], 'Present', ''];
-      if (templateMode === 'universal') example = ['Class 10', 'A', ...baseRow];
-      else if (templateMode === 'class') example = ['A', ...baseRow];
-      else example = baseRow;
+      if (templateMode === 'universal') headers.push('Class', 'Section');
+      else if (templateMode === 'class') headers.push('Section');
+      headers.push('Student Name', 'Student ID', 'Date', 'Status (Present/Absent/Leave)', 'Reason');
+      if (prefillStudents.length > 0) {
+        rows = prefillStudents.map(s => {
+          const base = [s.name, s.rollNumber || s.id, today, '', ''];
+          if (templateMode === 'class') return [s.section || '', ...base];
+          if (templateMode === 'universal') return [selectedClassName, s.section || '', ...base];
+          return base;
+        });
+      } else {
+        const base = ['John Doe', 'ID_123', today, 'Present', ''];
+        if (templateMode === 'universal') rows = [['Class 10', 'A', ...base]];
+        else if (templateMode === 'class') rows = [['A', ...base]];
+        else rows = [base];
+      }
     } else if (selectedType === 'fees') {
-      headers.push('Student ID', 'Month', 'Status (Paid/Partial/Unpaid)', 'Paid Amount', 'Date');
-      const baseRow = ['ID_123', 'Apr 2026', 'Paid', '5000', new Date().toISOString().split('T')[0]];
-      if (templateMode === 'universal') example = ['Class 10', 'A', ...baseRow];
-      else if (templateMode === 'class') example = ['A', ...baseRow];
-      else example = baseRow;
+      if (templateMode === 'universal') headers.push('Class', 'Section');
+      else if (templateMode === 'class') headers.push('Section');
+      headers.push('Student Name', 'Student ID', 'Month', 'Status (Paid/Partial/Unpaid)', 'Paid Amount', 'Date');
+      if (prefillStudents.length > 0) {
+        rows = prefillStudents.map(s => {
+          const base = [s.name, s.rollNumber || s.id, 'Apr 2026', '', '', today];
+          if (templateMode === 'class') return [s.section || '', ...base];
+          if (templateMode === 'universal') return [selectedClassName, s.section || '', ...base];
+          return base;
+        });
+      } else {
+        const base = ['John Doe', 'ID_123', 'Apr 2026', 'Paid', '5000', today];
+        if (templateMode === 'universal') rows = [['Class 10', 'A', ...base]];
+        else if (templateMode === 'class') rows = [['A', ...base]];
+        else rows = [base];
+      }
     } else if (selectedType === 'students') {
       headers.push('Name', 'Student ID', 'Gender', 'Parent Name', 'Contact Number');
       let baseRow = ['John Doe', '', 'Male', 'Richard Doe', '9876543210'];
-
-      if (studentTemplate === 'With Transport' || studentTemplate === 'Full' || studentTemplate === 'Custom') {
-        headers.push('Bus Service (Yes/No)', 'Bus Fee');
-        baseRow.push('Yes', '1500');
-      }
-      if (studentTemplate === 'Full' || studentTemplate === 'Custom') {
-        headers.push('DOB', 'Address');
-        baseRow.push('2010-05-15', '123 School Lane');
-      }
-
-      if (templateMode === 'universal') {
-        headers.unshift('Class', 'Section');
-        example = ['Class 10', 'A', ...baseRow];
-      } else if (templateMode === 'class') {
-        headers.unshift('Section');
-        example = ['A', ...baseRow];
-      } else {
-        example = baseRow;
-      }
+      if (studentTemplate === 'With Transport' || studentTemplate === 'Full' || studentTemplate === 'Custom') { headers.push('Bus Service (Yes/No)', 'Bus Fee'); baseRow.push('Yes', '1500'); }
+      if (studentTemplate === 'Full' || studentTemplate === 'Custom') { headers.push('DOB', 'Address'); baseRow.push('2010-05-15', '123 School Lane'); }
+      if (templateMode === 'universal') { headers.unshift('Class', 'Section'); rows = [['Class 10', 'A', ...baseRow]]; }
+      else if (templateMode === 'class') { headers.unshift('Section'); rows = [['A', ...baseRow]]; }
+      else rows = [baseRow];
     }
 
-    const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Template");
+    XLSX.utils.book_append_sheet(wb, ws, 'Template');
     XLSX.writeFile(wb, `${selectedType}_${templateMode}_template.xlsx`);
-    toast.info(`Downloading ${templateMode} ${selectedType} template...`);
+    const count = prefillStudents.length;
+    toast.info(count > 0 ? `Template downloaded with ${count} students pre-filled!` : `Downloading ${templateMode} ${selectedType} template...`);
   };
+
+
 
   const parseFile = async (file: File) => {
     try {

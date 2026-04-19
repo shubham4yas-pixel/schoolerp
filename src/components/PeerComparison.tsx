@@ -107,21 +107,19 @@ const PeerComparison = ({ student, viewerRole = 'student' }: PeerComparisonProps
           <div className="bg-card rounded-xl border border-border p-5">
             <h3 className="font-display font-semibold text-foreground mb-4">Compare Performance</h3>
 
-            {/* Subject filter */}
-            <div className="flex items-center gap-2 mb-4 flex-wrap">
-              <span className="text-sm text-muted-foreground font-medium">Subject:</span>
-              {['all', ...subjects].map(sub => (
-                <button
-                  key={sub}
-                  onClick={() => setSelectedSubject(sub)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${selectedSubject === sub
-                    ? 'bg-secondary text-secondary-foreground'
-                    : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                    }`}
-                >
-                  {sub === 'all' ? 'All Subjects' : sub}
-                </button>
-              ))}
+            {/* Subject filter - dropdown */}
+            <div className="flex items-center gap-3 mb-4">
+              <label className="text-sm text-muted-foreground font-medium whitespace-nowrap">Subject:</label>
+              <select
+                value={selectedSubject}
+                onChange={e => setSelectedSubject(e.target.value)}
+                className="bg-background border border-border rounded-xl px-3 py-2 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 min-w-[160px]"
+              >
+                <option value="all">All Subjects</option>
+                {subjects.map(sub => (
+                  <option key={sub} value={sub}>{sub}</option>
+                ))}
+              </select>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -143,36 +141,23 @@ const PeerComparison = ({ student, viewerRole = 'student' }: PeerComparisonProps
               ))}
             </div>
 
-            {/* Peer selector for 1v1 with search */}
+            {/* Peer selector for 1v1 - dropdown */}
             {scope === 'one-to-one' && (
               <div className="mt-4">
-                <div className="relative mb-2">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    placeholder="Search student by name..."
-                    value={peerSearch}
-                    onChange={e => setPeerSearch(e.target.value)}
-                    className="w-full pl-9 pr-4 py-3 bg-muted/50 border border-border rounded-xl text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-                <div className="max-h-48 overflow-y-auto bg-card border border-border rounded-xl">
-                  {filteredPeers.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-muted-foreground">No students found in Class {student.classId}</div>
-                  ) : (
-                    (filteredPeers || []).map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => { setCompareStudentId(p.id); setPeerSearch(''); }}
-                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors flex items-center justify-between ${p.id === compareStudentId ? 'bg-primary/10 text-primary' : 'text-foreground'
-                          }`}
-                      >
-                        <span>{p.name}</span>
-                        <span className="text-xs text-muted-foreground">Section {p.section}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
+                <label className="text-sm text-muted-foreground font-medium block mb-2">Select Peer to Compare:</label>
+                <select
+                  value={compareStudentId}
+                  onChange={e => setCompareStudentId(e.target.value)}
+                  className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">-- Select a student --</option>
+                  {sameClassPeers.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} (Section {p.section})</option>
+                  ))}
+                </select>
+                {sameClassPeers.length === 0 && (
+                  <p className="text-xs text-muted-foreground mt-2">No other students found in Class {student.classId}.</p>
+                )}
               </div>
             )}
           </div>
