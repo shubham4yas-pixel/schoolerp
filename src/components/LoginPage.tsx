@@ -498,7 +498,7 @@ const LoginPage = () => {
               {[
                 { stat: 'One Platform', label: 'Replaces spreadsheets, paper registers, and disconnected tools.' },
                 { stat: 'Real Schools', label: 'Built around the actual workflows of Indian schools, not adapted enterprise software.' },
-                { stat: 'Instant Access', label: 'Cloud-based — accessible from anywhere, no IT team required.' },
+                { stat: 'Instant Access', label: 'Cloud-based - accessible from anywhere, no IT team required.' },
               ].map((item) => (
                 <div key={item.stat} className="bg-card border border-border rounded-xl p-6 text-center">
                   <p className="text-xl font-extrabold text-primary font-display mb-2">{item.stat}</p>
@@ -517,7 +517,7 @@ const LoginPage = () => {
               Most school ERP software attempts to serve every institution from primary schools to
               universities, creating bloated, expensive products with steep learning curves. SchoolPulse
               takes a different approach: it focuses exclusively on the core processes that every school
-              needs — fee management, attendance, and academic tracking — and delivers them in a clean,
+              needs - fee management, attendance, and academic tracking - and delivers them in a clean,
               fast, and affordable web application. Indian schools deserve ERP software that works the
               way they do.
             </p>
