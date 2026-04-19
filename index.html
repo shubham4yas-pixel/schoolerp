@@ -2,31 +2,171 @@
 <html lang="en">
 
 <head>
+  <!-- Preconnect for performance -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
     href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap"
     rel="stylesheet">
+
+  <!-- Core -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- TODO: Set the document title to the name of your application -->
-  <title>SchoolPulse</title>
-  <link rel="icon" type="image/png" href="/Favicon.png?v=5" />
-  <meta name="description" content="SchoolPulse is a comprehensive school management ERP for efficient academic administration, fee management, and student performance tracking." />
+
+  <!-- Primary SEO -->
+  <title>SchoolPulse - School ERP for Fees, Attendance &amp; Student Management</title>
+  <meta name="description" content="Manage fees, attendance, exams and student records in one simple school ERP built for real schools." />
   <meta name="author" content="SchoolPulse" />
+  <meta name="robots" content="index, follow" />
+  <meta name="keywords" content="school ERP, school management software, fee management, attendance tracking, student records, school administration, India school ERP" />
+
+  <!-- Canonical -->
+  <link rel="canonical" href="https://www.theschoolpulse.in/" />
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="/Favicon.png?v=5" />
+  <link rel="apple-touch-icon" href="/Favicon.png" />
 
   <!-- Open Graph / Facebook -->
-  <meta property="og:title" content="SchoolPulse" />
-  <meta property="og:description" content="Empowering schools with efficient student management, automated fee tracking, and streamlined academic administration." />
   <meta property="og:type" content="website" />
-  <meta property="og:image" content="/og-image.png" />
+  <meta property="og:url" content="https://www.theschoolpulse.in/" />
+  <meta property="og:site_name" content="SchoolPulse" />
+  <meta property="og:title" content="SchoolPulse - School ERP for Fees, Attendance &amp; Student Management" />
+  <meta property="og:description" content="Manage fees, attendance, exams and student records in one simple school ERP built for real schools." />
+  <meta property="og:image" content="https://www.theschoolpulse.in/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="SchoolPulse - School ERP Dashboard" />
+  <meta property="og:locale" content="en_IN" />
 
-  <!-- Twitter -->
+  <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:site" content="@SchoolPulse" />
-  <meta name="twitter:title" content="SchoolPulse" />
-  <meta name="twitter:description" content="Empowering schools with efficient student management and streamlined academic administration." />
-  <meta name="twitter:image" content="/og-image.png" />
+  <meta name="twitter:creator" content="@SchoolPulse" />
+  <meta name="twitter:url" content="https://www.theschoolpulse.in/" />
+  <meta name="twitter:title" content="SchoolPulse - School ERP for Fees, Attendance &amp; Student Management" />
+  <meta name="twitter:description" content="Manage fees, attendance, exams and student records in one simple school ERP built for real schools." />
+  <meta name="twitter:image" content="https://www.theschoolpulse.in/og-image.png" />
+  <meta name="twitter:image:alt" content="SchoolPulse - School ERP Dashboard" />
+
+  <!-- JSON-LD: SoftwareApplication Schema -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "SchoolPulse",
+    "url": "https://www.theschoolpulse.in/",
+    "description": "SchoolPulse is a comprehensive school ERP designed for real schools in India. It centralises fee collection, attendance tracking, exam management, and student records into one simple, accessible platform for administrators, teachers, and parents.",
+    "applicationCategory": "EducationalApplication",
+    "applicationSubCategory": "School Management Software",
+    "operatingSystem": "Web",
+    "browserRequirements": "Requires a modern web browser with JavaScript enabled",
+    "inLanguage": "en-IN",
+    "featureList": [
+      "Automated fee management and collection",
+      "Attendance tracking with real-time reports",
+      "Student performance reports and mark sheets",
+      "Admin dashboard for school-wide oversight",
+      "Teacher access for marks, attendance, and feedback",
+      "Parent access to child's progress and fees",
+      "Exam scheduling and result management",
+      "Role-based access control"
+    ],
+    "audience": [
+      {
+        "@type": "EducationalAudience",
+        "educationalRole": "administrator"
+      },
+      {
+        "@type": "EducationalAudience",
+        "educationalRole": "teacher"
+      },
+      {
+        "@type": "EducationalAudience",
+        "educationalRole": "student"
+      },
+      {
+        "@type": "EducationalAudience",
+        "educationalRole": "parent"
+      }
+    ],
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "INR",
+      "availability": "https://schema.org/InStock",
+      "description": "Contact for pricing"
+    },
+    "provider": {
+      "@type": "Organization",
+      "name": "SchoolPulse",
+      "url": "https://www.theschoolpulse.in/"
+    },
+    "image": "https://www.theschoolpulse.in/og-image.png",
+    "screenshot": "https://www.theschoolpulse.in/og-image.png"
+  }
+  </script>
+
+  <!-- JSON-LD: FAQPage Schema -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is SchoolPulse?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "SchoolPulse is a web-based school ERP (Enterprise Resource Planning) system that helps schools manage fees, attendance, student records, exams, and communication between administrators, teachers, and parents — all from one dashboard."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Who can use SchoolPulse?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "SchoolPulse is designed for school administrators, accountants, teachers, students, and parents. Each role gets a dedicated dashboard with the tools and information they need."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does SchoolPulse support fee collection and receipts?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. SchoolPulse includes a complete fee management module with automated fee tracking, payment recording, and printable receipts — reducing manual work for school accountants."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is SchoolPulse cloud-based?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. SchoolPulse is fully cloud-based and accessible from any device with a modern web browser. No installation or special hardware is required."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does SchoolPulse work for small and medium schools?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Absolutely. SchoolPulse is built specifically for the needs of small and medium-sized schools that want a simple, reliable ERP without the complexity of enterprise solutions."
+        }
+      }
+    ]
+  }
+  </script>
+
+  <!-- JSON-LD: WebSite Schema -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "SchoolPulse",
+    "url": "https://www.theschoolpulse.in/",
+    "description": "Simple school ERP for fees, attendance, and student management."
+  }
+  </script>
 </head>
 
 <body>
