@@ -49,124 +49,70 @@
   <meta name="twitter:image" content="https://www.theschoolpulse.in/og-image.png" />
   <meta name="twitter:image:alt" content="SchoolPulse - School ERP Dashboard" />
 
-  <!-- JSON-LD: SoftwareApplication Schema -->
+  <!-- JSON-LD Structured Data: SoftwareApplication & FAQPage -->
   <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "SchoolPulse",
-    "url": "https://www.theschoolpulse.in/",
-    "description": "SchoolPulse is a comprehensive school ERP designed for real schools in India. It centralises fee collection, attendance tracking, exam management, and student records into one simple, accessible platform for administrators, teachers, and parents.",
-    "applicationCategory": "EducationalApplication",
-    "applicationSubCategory": "School Management Software",
-    "operatingSystem": "Web",
-    "browserRequirements": "Requires a modern web browser with JavaScript enabled",
-    "inLanguage": "en-IN",
-    "featureList": [
-      "Automated fee management and collection",
-      "Attendance tracking with real-time reports",
-      "Student performance reports and mark sheets",
-      "Admin dashboard for school-wide oversight",
-      "Teacher access for marks, attendance, and feedback",
-      "Parent access to child's progress and fees",
-      "Exam scheduling and result management",
-      "Role-based access control"
-    ],
-    "audience": [
-      {
-        "@type": "EducationalAudience",
-        "educationalRole": "administrator"
-      },
-      {
-        "@type": "EducationalAudience",
-        "educationalRole": "teacher"
-      },
-      {
-        "@type": "EducationalAudience",
-        "educationalRole": "student"
-      },
-      {
-        "@type": "EducationalAudience",
-        "educationalRole": "parent"
+  [
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "SchoolPulse",
+      "applicationCategory": "EducationApplication",
+      "operatingSystem": "Web",
+      "url": "https://www.theschoolpulse.in/",
+      "description": "SchoolPulse is a comprehensive school ERP designed for efficient fee management, attendance tracking, and student performance reports.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "INR"
       }
-    ],
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "INR",
-      "availability": "https://schema.org/InStock",
-      "description": "Contact for pricing"
     },
-    "provider": {
-      "@type": "Organization",
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is SchoolPulse?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "SchoolPulse is a web-based school ERP system that helps schools manage fees, attendance, student records, exams, and parent communication from one dashboard."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Who can use SchoolPulse?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "It is designed for school administrators, accountants, teachers, students, and parents with dedicated dashboards for each role."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does SchoolPulse support fee collection?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes, it includes a complete fee management module with automated tracking, payment recording, and printable receipts."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Is SchoolPulse cloud-based?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes, SchoolPulse is fully cloud-based and accessible from any modern web browser without any local installation."
+          }
+        }
+      ]
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
       "name": "SchoolPulse",
       "url": "https://www.theschoolpulse.in/"
-    },
-    "image": "https://www.theschoolpulse.in/og-image.png",
-    "screenshot": "https://www.theschoolpulse.in/og-image.png"
-  }
+    }
+  ]
   </script>
 
-  <!-- JSON-LD: FAQPage Schema -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      {
-        "@type": "Question",
-        "name": "What is SchoolPulse?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "SchoolPulse is a web-based school ERP (Enterprise Resource Planning) system that helps schools manage fees, attendance, student records, exams, and communication between administrators, teachers, and parents - all from one dashboard."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Who can use SchoolPulse?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "SchoolPulse is designed for school administrators, accountants, teachers, students, and parents. Each role gets a dedicated dashboard with the tools and information they need."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Does SchoolPulse support fee collection and receipts?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Yes. SchoolPulse includes a complete fee management module with automated fee tracking, payment recording, and printable receipts — reducing manual work for school accountants."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Is SchoolPulse cloud-based?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Yes. SchoolPulse is fully cloud-based and accessible from any device with a modern web browser. No installation or special hardware is required."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Does SchoolPulse work for small and medium schools?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Absolutely. SchoolPulse is built specifically for the needs of small and medium-sized schools that want a simple, reliable ERP without the complexity of enterprise solutions."
-        }
-      }
-    ]
-  }
-  </script>
-
-  <!-- JSON-LD: WebSite Schema -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    "name": "SchoolPulse",
-    "url": "https://www.theschoolpulse.in/",
-    "description": "Simple school ERP for fees, attendance, and student management."
-  }
-  </script>
 </head>
 
 <body>
