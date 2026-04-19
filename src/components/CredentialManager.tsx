@@ -1058,7 +1058,7 @@ const AddCredentialForm = ({
             onChange={event => setForm({ ...form, role: event.target.value as UserRole })}
             className="w-full px-3 py-2 text-sm bg-muted/50 border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           >
-            {ROLE_OPTIONS.map(option => (
+            {ROLE_OPTIONS.filter(option => option.value !== 'admin').map(option => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
