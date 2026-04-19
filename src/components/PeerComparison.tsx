@@ -190,7 +190,9 @@ const PeerComparison = ({ student, viewerRole = 'student' }: PeerComparisonProps
 
 // Rankings sub-component
 function RankingsTable({ student, scope, students, marks }: { student: Student; scope: 'class'; students: Student[]; marks: Mark[] }) {
+  const { classes: storeClasses } = useStore();
   const pool = students.filter(s => s.classId === student.classId);
+  const className = storeClasses.find(c => c.classId === student.classId)?.name || student.className || student.class || student.classId;
 
   const rankings = pool
     .map(s => ({ ...s, pct: getOverallPercentage(s.id, marks) }))
@@ -199,7 +201,7 @@ function RankingsTable({ student, scope, students, marks }: { student: Student; 
   return (
     <div className="bg-card rounded-xl border border-border p-5">
       <h3 className="font-display font-semibold text-foreground mb-4">
-        Class {student.classId} Rankings
+        {className} Rankings
       </h3>
       <div className="space-y-1.5">
         {(rankings || []).map((s, i) => {
