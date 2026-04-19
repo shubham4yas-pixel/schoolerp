@@ -57,14 +57,11 @@ const features = [
 const FAQAccordion = ({ faqs }: { faqs: FAQItem[] }) => {
   const [open, setOpen] = useState<number | null>(null);
   return (
-    <div className="space-y-3" itemScope itemType="https://schema.org/FAQPage">
+    <div className="space-y-3">
       {faqs.map((item, i) => (
         <div
           key={i}
           className="border border-border rounded-xl overflow-hidden"
-          itemScope
-          itemProp="mainEntity"
-          itemType="https://schema.org/Question"
         >
           <button
             id={`faq-q-${i}`}
@@ -73,21 +70,18 @@ const FAQAccordion = ({ faqs }: { faqs: FAQItem[] }) => {
             onClick={() => setOpen(open === i ? null : i)}
             className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left bg-card hover:bg-muted/40 transition-colors"
           >
-            <span className="font-semibold text-sm text-foreground" itemProp="name">{item.q}</span>
+            <span className="font-semibold text-sm text-foreground">{item.q}</span>
             {open === i ? <ChevronUp className="w-4 h-4 text-muted-foreground flex-shrink-0" /> : <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
           </button>
-          {/* Always in DOM so Google bot can read acceptedAnswer - visibility via CSS only */}
+          {/* Answer always in DOM for accessibility; CSS controls visibility */}
           <div
             id={`faq-a-${i}`}
             role="region"
             aria-labelledby={`faq-q-${i}`}
             className="px-5 text-sm text-muted-foreground bg-card transition-all duration-300 overflow-hidden"
             style={{ maxHeight: open === i ? '200px' : '0px', paddingBottom: open === i ? '1rem' : '0px' }}
-            itemScope
-            itemProp="acceptedAnswer"
-            itemType="https://schema.org/Answer"
           >
-            <p itemProp="text">{item.a}</p>
+            <p>{item.a}</p>
           </div>
         </div>
       ))}
