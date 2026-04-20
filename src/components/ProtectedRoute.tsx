@@ -38,15 +38,19 @@ const ProtectedRoute = ({ role: requiredRole, children }: { role: UserRole; chil
   const { role, authLoading } = useAuth();
   const location = useLocation();
 
+  console.log(`[ProtectedRoute] path=${location.pathname} | required=${requiredRole} | current=${role ?? 'none'} | loading=${authLoading}`);
+
   if (authLoading) {
     return <AuthLoader />;
   }
 
   if (!role) {
+    console.log(`[ProtectedRoute] No role — redirecting to / from ${location.pathname}`);
     return <Navigate to="/" replace state={{ from: location }} />;
   }
 
   if (!isAllowedRole(role, requiredRole)) {
+    console.log(`[ProtectedRoute] Wrong role (${role} ≠ ${requiredRole}) — redirecting to ${getRoleHomePath(role)}`);
     return <Navigate to={getRoleHomePath(role)} replace />;
   }
 

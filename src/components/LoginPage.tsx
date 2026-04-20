@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+
 import { useAuth } from '@/contexts/AuthContext';
 import { AppUser, UserRole } from '@/lib/types';
 import { supabase } from '@/lib/supabase';
@@ -9,7 +9,6 @@ import {
   ChevronDown, ChevronUp, Eye, EyeOff
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getRoleHomePath } from '@/components/ProtectedRoute';
 
 // ─────────────────────────────────────────────
 // Types
@@ -94,7 +93,6 @@ const FAQAccordion = ({ faqs }: { faqs: FAQItem[] }) => {
 // ─────────────────────────────────────────────
 const LoginPage = () => {
   const { authError, clearAuthError, setPendingLoginRole, authLoading, signOut } = useAuth();
-  const navigate = useNavigate();
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -156,12 +154,17 @@ const LoginPage = () => {
     const safetyTimer = setTimeout(() => setIsLoading(false), 10000);
 
     try {
+      console.log('[Login] Attempting signInWithPassword for role:', selectedRole);
       const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
       if (loginError) throw loginError;
 
+      // Pre-flight: verify profile exists and role matches BEFORE committing the session.
+      // This gives us a fast, clean UI error path. AuthContext's onAuthStateChange will
+      // do the authoritative sync and drive navigation — we must NOT call navigate() here.
       const userData = data.user ? await resolveUserProfile(data.user.id) : null;
 
       if (!userData) {
+        console.warn('[Login] Profile not found for uid:', data.user?.id);
         setPendingLoginRole(null);
         setError('Account verified, but profile not found. Please contact admin.');
         setIsLoading(false);
@@ -171,6 +174,7 @@ const LoginPage = () => {
 
       if (selectedRole !== userData.role) {
         const roleLabel = roles.find(r => r.role === userData.role)?.label || userData.role;
+        console.warn('[Login] Role mismatch: selected', selectedRole, 'but profile is', userData.role);
         setPendingLoginRole(null);
         setError(`Access denied: This account is registered as ${roleLabel}.`);
         setIsLoading(false);
@@ -179,6 +183,7 @@ const LoginPage = () => {
       }
 
       if (userData.role === 'student' && !userData.linkedStudentId && !(userData.linkedChildrenIds || []).length) {
+        console.warn('[Login] Student login with no linked student record');
         setPendingLoginRole(null);
         setError('No student record linked to this account.');
         setIsLoading(false);
@@ -186,15 +191,22 @@ const LoginPage = () => {
         return;
       }
 
-      navigate(getRoleHomePath(userData.role), { replace: true });
+      // ✅ All checks passed. Do NOT navigate manually here.
+      // AuthContext's onAuthStateChange listener will fire for the SIGNED_IN event,
+      // call syncSession / applyUser, set role in context, and AuthGate in App.tsx
+      // will automatically redirect to the correct dashboard.
+      console.log('[Login] Sign-in successful — waiting for AuthContext to set role and redirect...');
+      // isLoading stays true while AuthContext resolves the session (shows spinner).
     } catch (error: any) {
-      console.error('Supabase login error:', error.message || error);
+      console.error('[Login] signInWithPassword error:', error.message || error);
       setPendingLoginRole(null);
       setError('Invalid email or password. Please check your credentials.');
-    } finally {
       clearTimeout(safetyTimer);
       setIsLoading(false);
     }
+    // Note: we intentionally do NOT clear safetyTimer in the success path so the spinner
+    // keeps showing until AuthContext resolves. AuthGate will unmount LoginPage entirely
+    // once role is set, which cleans up everything naturally.
   };
 
   const handleForgotPassword = async () => {

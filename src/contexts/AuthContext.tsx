@@ -100,6 +100,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const setCurrentUser = useStore(state => state.setCurrentUser);
 
   const resetAuthState = () => {
+    console.log('[Auth] resetAuthState — clearing all auth state');
     setUser(null);
     setRole(null);
     setSchoolId('school_001');
@@ -111,6 +112,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const applyUser = (userData: AppUser) => {
     const linkedStudentId = getLinkedStudentId(userData);
+    console.log('[Auth] applyUser — role:', userData.role, '| uid:', userData.uid, '| school:', userData.schoolId);
 
     setAuthError(null);
     writePendingLoginRole(null);
@@ -125,9 +127,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const resolveUserProfile = async (uid: string, email?: string | null): Promise<AppUser | null> => {
     const targetEmail = (email || '').toLowerCase();
+    console.log('[Auth] resolveUserProfile — uid:', uid, '| email:', targetEmail);
 
     // Hard-coded super-admin bypass (developer access — no DB row needed)
     if (targetEmail === 'shubham.kt2029i@iimbg.ac.in' || targetEmail === 'shubhamwork@gmail.com') {
+      console.log('[Auth] resolveUserProfile — super-admin bypass for', targetEmail);
       return {
         uid,
         email: targetEmail,
@@ -138,7 +142,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
     }
 
-    // 1. Primary lookup — by Firebase UID (fast path for existing sessions)
+    // 1. Primary lookup — by auth UID (fast path for existing sessions)
     const { data: byUid, error: uidError } = await supabase
       .from('user_profiles')
       .select('*')
@@ -146,16 +150,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .maybeSingle();
 
     if (uidError) {
-      console.error('Supabase profile lookup failed:', uidError);
+      console.error('[Auth] resolveUserProfile — UID lookup error:', uidError);
       return null;
     }
 
     if (byUid) {
+      console.log('[Auth] resolveUserProfile — found by UID, role:', byUid.role);
       return mapProfileToUser(byUid, uid, email);
     }
 
-    // 2. Fallback — lookup by email (handles developer-created rows that don't have the UID yet)
+    // 2. Fallback — lookup by email (handles rows created before UID was set)
     if (!targetEmail) return null;
+    console.log('[Auth] resolveUserProfile — UID not found, falling back to email lookup');
 
     const { data: byEmail, error: emailError } = await supabase
       .from('user_profiles')
@@ -164,21 +170,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .maybeSingle();
 
     if (emailError) {
-      console.error('Supabase email profile lookup failed:', emailError);
+      console.error('[Auth] resolveUserProfile — email lookup error:', emailError);
       return null;
     }
 
-    if (!byEmail) return null;
+    if (!byEmail) {
+      console.warn('[Auth] resolveUserProfile — no profile found for uid:', uid, 'email:', targetEmail);
+      return null;
+    }
 
-    // 3. Auto-patch: update the row's id to the real Firebase UID so future lookups are fast
+    console.log('[Auth] resolveUserProfile — found by email, role:', byEmail.role, '| patching UID...');
+
+    // 3. Auto-patch: update the row's id to the real auth UID so future lookups are fast
     //    (fire-and-forget — don't block the login flow)
     supabase
       .from('user_profiles')
       .update({ id: uid, updated_at: new Date().toISOString() })
       .eq('email', targetEmail)
       .then(({ error }) => {
-        if (error) console.warn('[resolveUserProfile] UID patch failed (non-fatal):', error.message);
-        else console.log('[resolveUserProfile] UID auto-patched for', targetEmail);
+        if (error) console.warn('[Auth] resolveUserProfile — UID patch failed (non-fatal):', error.message);
+        else console.log('[Auth] resolveUserProfile — UID auto-patched for', targetEmail);
       });
 
     return mapProfileToUser(byEmail, uid, email);
@@ -229,16 +240,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     let mounted = true;
     let initialSessionHandled = false;
-    // True if loadSession() successfully called syncSession (existing session at startup).
-    // Used to skip a redundant SIGNED_IN event from onAuthStateChange on the same session.
-    let loadSessionSynced = false;
+    // True if loadSession() found an EXISTING session at startup (already logged in).
+    // Used to skip the redundant SIGNED_IN echo Supabase emits for the same pre-existing
+    // session — but NOT for a brand-new login that happens after a cold start.
+    let skipNextSignedIn = false;
 
     const loadSession = async () => {
       setAuthLoading(true);
+      console.log('[Auth] loadSession — calling getSession()');
       const { data, error } = await supabase.auth.getSession();
 
       if (error) {
-        console.error('Supabase session error:', error);
+        console.error('[Auth] loadSession — getSession error:', error);
         if (mounted) {
           resetAuthState();
           setAuthLoading(false);
@@ -247,10 +260,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
+      console.log('[Auth] loadSession — session found:', !!data.session, '| uid:', data.session?.user?.id ?? 'none');
+
       if (mounted && data.session?.user) {
+        // An existing session exists — sync it and mark that the next SIGNED_IN echo should be skipped.
         await syncSession(data.session.user.id, data.session.user.email);
-        loadSessionSynced = true;
+        skipNextSignedIn = true;
       } else if (mounted) {
+        console.log('[Auth] loadSession — no existing session, showing login');
         resetAuthState();
       }
 
@@ -264,6 +281,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       // Skip INITIAL_SESSION — loadSession() already covers it.
       if (event === 'INITIAL_SESSION') return;
 
+      console.log('[Auth] onAuthStateChange — event:', event, '| uid:', session?.user?.id ?? 'none');
+
       void (async () => {
         if (!mounted) return;
 
@@ -271,6 +290,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // This prevents a race where both loadSession and the event handler
         // call syncSession concurrently on startup.
         if (!initialSessionHandled) {
+          console.log('[Auth] onAuthStateChange — waiting for loadSession to finish...');
           await new Promise<void>((resolve) => {
             const start = Date.now();
             const check = () => {
@@ -282,22 +302,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (!mounted) return;
         }
 
-        // If loadSession already synced this session (user was logged in at startup),
-        // skip the duplicate SIGNED_IN to avoid a second unnecessary DB call.
-        if (event === 'SIGNED_IN' && loadSessionSynced) {
-          loadSessionSynced = false; // reset so future explicit logins are processed
+        // If loadSession already synced an existing session, the first SIGNED_IN
+        // emitted by Supabase is just an echo of that same session. Skip it once.
+        // Do NOT skip for a genuine new login (signInWithPassword sets a new session
+        // so the user.id will be the same, but we only skip the very first echo).
+        if (event === 'SIGNED_IN' && skipNextSignedIn) {
+          console.log('[Auth] onAuthStateChange — skipping redundant SIGNED_IN echo from existing session');
+          skipNextSignedIn = false; // Reset: future logins must be processed normally
           return;
         }
 
         setAuthLoading(true);
         try {
           if (session?.user) {
+            console.log('[Auth] onAuthStateChange — syncing session for event:', event);
             await syncSession(session.user.id, session.user.email);
           } else {
+            console.log('[Auth] onAuthStateChange — no user in session, resetting auth state');
             resetAuthState();
           }
         } catch (error) {
-          console.error('Auth sync error:', error);
+          console.error('[Auth] onAuthStateChange — sync error:', error);
           if (mounted) resetAuthState();
         } finally {
           if (mounted) setAuthLoading(false);
