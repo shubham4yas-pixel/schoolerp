@@ -228,9 +228,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     let mounted = true;
-    // Track whether the initial getSession() already handled the session
-    // so onAuthStateChange doesn't double-sync on the INITIAL_SESSION event.
     let initialSessionHandled = false;
+    // True if loadSession() successfully called syncSession (existing session at startup).
+    // Used to skip a redundant SIGNED_IN event from onAuthStateChange on the same session.
+    let loadSessionSynced = false;
 
     const loadSession = async () => {
       setAuthLoading(true);
@@ -248,6 +249,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (mounted && data.session?.user) {
         await syncSession(data.session.user.id, data.session.user.email);
+        loadSessionSynced = true;
       } else if (mounted) {
         resetAuthState();
       }
@@ -259,13 +261,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void loadSession();
 
     const { data: subscription } = supabase.auth.onAuthStateChange((event, session) => {
-      // Skip the INITIAL_SESSION event — loadSession() already covered it.
+      // Skip INITIAL_SESSION — loadSession() already covers it.
       if (event === 'INITIAL_SESSION') return;
-      // Also skip if loadSession hasn't finished yet — it will handle everything.
-      if (!initialSessionHandled) return;
 
       void (async () => {
         if (!mounted) return;
+
+        // Wait for loadSession() to finish before processing any other event.
+        // This prevents a race where both loadSession and the event handler
+        // call syncSession concurrently on startup.
+        if (!initialSessionHandled) {
+          await new Promise<void>((resolve) => {
+            const start = Date.now();
+            const check = () => {
+              if (initialSessionHandled || Date.now() - start > 5000) resolve();
+              else setTimeout(check, 50);
+            };
+            check();
+          });
+          if (!mounted) return;
+        }
+
+        // If loadSession already synced this session (user was logged in at startup),
+        // skip the duplicate SIGNED_IN to avoid a second unnecessary DB call.
+        if (event === 'SIGNED_IN' && loadSessionSynced) {
+          loadSessionSynced = false; // reset so future explicit logins are processed
+          return;
+        }
+
         setAuthLoading(true);
         try {
           if (session?.user) {
