@@ -93,6 +93,11 @@ BEGIN
       updated_at = NOW()
     WHERE LOWER(email) = _email;
 
+    -- Sync the name back to auth.users so it appears in the Supabase Auth Dashboard
+    UPDATE auth.users 
+    SET raw_user_meta_data = COALESCE(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('full_name', (SELECT name FROM public.user_profiles WHERE id = NEW.id LIMIT 1))
+    WHERE id = NEW.id;
+
     RAISE LOG '[handle_new_auth_user] Linked auth UID % to pre-created profile for %', NEW.id, _email;
 
   ELSE
