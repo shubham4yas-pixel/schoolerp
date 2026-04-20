@@ -35,7 +35,9 @@ const getLinkedStudentId = (userData: AppUser) => {
 const mapProfileToUser = (profile: any, uid: string, email?: string | null): AppUser => ({
   uid,
   email: profile.email || email || '',
-  role: profile.role || 'student',
+  // Preserve null role — do NOT coerce to a default.
+  // A null role means the admin hasn't assigned one yet.
+  role: profile.role ?? null,
   name: profile.name || profile.email || email || 'User',
   emailSent: Boolean(profile.email_sent ?? profile.emailSent),
   classId: profile.class_id || profile.classId || undefined,
@@ -206,15 +208,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         console.warn('[syncSession] Profile not found but no pending role — skipping sign-out (likely admin creating user).');
         return;
       }
-      setAuthError('User profile not found. Please contact admin.');
+      setAuthError('User profile not found. Please contact your school admin.');
       writePendingLoginRole(null);
       resetAuthState();
       await supabase.auth.signOut();
       return;
     }
 
+    // If the user's role is null they haven't been assigned one yet.
+    // Do NOT block login or sign them out — applyUser with null role lets the
+    // login page show a clear 'No role assigned' error message.
+    if (userData.role === null) {
+      console.warn('[Auth] syncSession — user has no role assigned yet:', userData.email);
+      applyUser(userData);
+      writePendingLoginRole(null);
+      return;
+    }
+
+    // Role-portal mismatch: user selected Admin portal but their profile says Teacher, etc.
+    // Only enforce this when a pending role was explicitly chosen on the login screen.
     if (pendingLoginRole && userData.role !== pendingLoginRole) {
-      setAuthError(`Entry denied: User is registered as ${userData.role}, not ${pendingLoginRole}.`);
+      setAuthError(`Entry denied: This account is registered as ${userData.role}, not ${pendingLoginRole}.`);
       writePendingLoginRole(null);
       resetAuthState();
       await supabase.auth.signOut();
@@ -222,7 +236,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     if (userData.role === 'student' && !getLinkedStudentId(userData)) {
-      setAuthError('No student record linked to this account.');
+      setAuthError('No student record linked to this account. Contact your school admin.');
       writePendingLoginRole(null);
       resetAuthState();
       await supabase.auth.signOut();

@@ -213,7 +213,7 @@ export interface LoginCredential {
 export interface AppUser {
   uid: string;
   email: string;
-  role: UserRole;
+  role: UserRole | null; // null = not yet assigned by admin
   name: string;
   emailSent?: boolean;
   classId?: string;
