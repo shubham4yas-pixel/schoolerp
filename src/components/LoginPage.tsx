@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { AppUser, UserRole } from '@/lib/types';
@@ -564,6 +565,11 @@ const LoginPage = () => {
         <p className="text-xs text-muted-foreground">
           &copy; {new Date().getFullYear()} SchoolPulse. School ERP for Fees, Attendance &amp; Student Management.
           &nbsp;|&nbsp; <a href="https://www.theschoolpulse.in/" className="underline hover:text-foreground transition-colors">theschoolpulse.in</a>
+        </p>
+        <p className="text-xs text-muted-foreground/70 mt-2 flex items-center justify-center gap-3">
+          <Link to="/privacy-policy" className="hover:text-foreground hover:underline transition-colors">Privacy Policy</Link>
+          <span aria-hidden="true">·</span>
+          <Link to="/terms-of-service" className="hover:text-foreground hover:underline transition-colors">Terms of Service</Link>
         </p>
       </footer>
     </div>

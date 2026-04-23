@@ -1,0 +1,339 @@
+/* ============================================================
+   LegalLayout.css  — Isolated styles for legal pages only.
+   All selectors prefixed with .legal- to avoid collisions.
+   ============================================================ */
+
+/* ---------- Google Font ---------- */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+/* ---------- Root shell ---------- */
+.legal-root {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background: #f9fafb;
+  height: 100vh;          /* full viewport — no overflow on root */
+  display: flex;
+  flex-direction: column;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;       /* scroll is handled per-column */
+}
+
+/* ---------- Header ---------- */
+.legal-header {
+  flex-shrink: 0;         /* never shrink; always full height */
+  z-index: 50;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.legal-header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2rem;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.legal-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.legal-logo-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #1e3a8a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.legal-logo-text {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #111827;
+}
+
+.legal-header-links {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.legal-header-link {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.legal-header-link:hover {
+  color: #111827;
+}
+
+/* ---------- Two-column page wrapper ---------- */
+.legal-page-wrapper {
+  flex: 1 1 0;            /* fill all height below header */
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  overflow: hidden;       /* children handle their own scroll */
+}
+
+/* ---------- Sidebar column ---------- */
+.legal-sidebar-col {
+  overflow: hidden;       /* sidebar NEVER scrolls */
+  border-right: 1px solid #e5e7eb;
+  background: #fff;
+  padding: 2rem 1.25rem;
+}
+
+.legal-sidebar-sticky {
+  /* no longer needed for positioning, kept for DOM compat */
+}
+
+/* ---------- Sidebar nav ---------- */
+.legal-sidebar {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.legal-sidebar-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9ca3af;
+  padding: 0 0.5rem;
+  margin: 0 0 0.75rem;
+}
+
+.legal-sidebar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.legal-sidebar-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: #6b7280;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+  line-height: 1.4;
+}
+
+.legal-sidebar-link:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.legal-sidebar-link.active {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+/* ---------- Content column ---------- */
+.legal-content-col {
+  min-width: 0;           /* prevent grid blowout */
+  overflow-y: auto;       /* ONLY this column scrolls */
+  padding: 3rem 3rem 5rem;
+  max-width: 860px;
+}
+
+.legal-content-header {
+  padding-bottom: 2rem;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 2.5rem;
+}
+
+.legal-page-title {
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: #111827;
+  margin: 0 0 0.5rem;
+  line-height: 1.15;
+}
+
+.legal-page-subtitle {
+  font-size: 1.05rem;
+  color: #6b7280;
+  margin: 0 0 1rem;
+  line-height: 1.6;
+}
+
+.legal-effective-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 100px;
+  padding: 0.3rem 0.75rem;
+  font-weight: 500;
+  margin: 0;
+}
+
+.legal-effective-label {
+  font-weight: 600;
+}
+
+/* ---------- Sections ---------- */
+.legal-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.legal-section {
+  padding: 2.5rem 0;
+  border-bottom: 1px solid #f3f4f6;
+  scroll-margin-top: 100px; /* offset for sticky header */
+}
+
+.legal-section:last-child {
+  border-bottom: none;
+}
+
+.legal-section-heading {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+  letter-spacing: -0.02em;
+  margin: 0 0 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.legal-section-heading::before {
+  content: "";
+  display: block;
+  width: 4px;
+  height: 1.1em;
+  background: #1d4ed8;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.legal-section p {
+  font-size: 0.96rem;
+  line-height: 1.8;
+  color: #374151;
+  margin: 0 0 1rem;
+}
+
+.legal-section p:last-child {
+  margin-bottom: 0;
+}
+
+.legal-section ul,
+.legal-section ol {
+  padding-left: 1.4rem;
+  margin: 0.5rem 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.legal-section li {
+  font-size: 0.96rem;
+  line-height: 1.75;
+  color: #374151;
+}
+
+.legal-section strong {
+  color: #111827;
+  font-weight: 600;
+}
+
+/* ---------- Content footer ---------- */
+.legal-content-footer {
+  margin-top: 3.5rem;
+  padding-top: 2rem;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.8rem;
+  color: #9ca3af;
+}
+
+.legal-footer-links {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.legal-footer-links a {
+  color: #9ca3af;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.legal-footer-links a:hover {
+  color: #1d4ed8;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 900px) {
+  .legal-root {
+    height: auto;           /* restore normal flow on mobile */
+    overflow: visible;
+  }
+
+  .legal-page-wrapper {
+    grid-template-columns: 1fr;
+    overflow: visible;
+    flex: none;
+  }
+
+  .legal-sidebar-col {
+    overflow: visible;
+    border-right: none;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 1.5rem 1.25rem;
+  }
+
+  .legal-content-col {
+    overflow-y: visible;
+    padding: 2rem 1.25rem 4rem;
+    max-width: 100%;
+  }
+
+  .legal-header-links {
+    display: none;
+  }
+
+  .legal-page-title {
+    font-size: 1.75rem;
+  }
+}

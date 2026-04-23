@@ -16,6 +16,8 @@ import StudentDashboard from "@/pages/StudentDashboard";
 import ParentDashboard from "@/pages/ParentDashboard";
 import Login from "@/pages/Login";
 import ResetPassword from "@/pages/ResetPassword";
+import PrivacyPolicy from "@/pages/PrivacyPolicy";
+import TermsOfService from "@/pages/TermsOfService";
 import { Loader2 } from "lucide-react";
 
 const queryClient = new QueryClient();
@@ -76,6 +78,8 @@ const App = () => {
                 <Route path="/parent" element={<ProtectedRoute role="parent"><ParentDashboard /></ProtectedRoute>} />
                 <Route path="/students" element={<Navigate to="/student" replace />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+                <Route path="/terms-of-service" element={<TermsOfService />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>
